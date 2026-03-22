@@ -104,73 +104,6 @@ def encode_image_via_img2text(model, img2text, images, args):
 def build_text_mask(tokens):
     return tokens.ne(0)
 
-
-def _transformer_forward_until(transformer, x, end_layer):
-    if hasattr(transformer, "forward_until"):
-        return transformer.forward_until(x, end_layer=end_layer)
-
-    blocks = transformer.resblocks
-    if end_layer is None:
-        end_layer = len(blocks)
-    if end_layer < 0:
-        end_layer = len(blocks) + end_layer
-    end_layer = max(0, min(end_layer, len(blocks)))
-    for block in blocks[:end_layer]:
-        x = block(x)
-    return x
-
-
-def _transformer_forward_from(transformer, x, start_layer):
-    if hasattr(transformer, "forward_from"):
-        return transformer.forward_from(x, start_layer=start_layer)
-
-    blocks = transformer.resblocks
-    if start_layer < 0:
-        start_layer = len(blocks) + start_layer
-    start_layer = max(0, min(start_layer, len(blocks)))
-    for block in blocks[start_layer:]:
-        x = block(x)
-    return x
-
-
-def extract_text_token_features(model, text, end_layer=-1):
-    if hasattr(model, "encode_text_tokens"):
-        return model.encode_text_tokens(text, end_layer=end_layer)
-
-    x = model.token_embedding(text).type(model.dtype)
-    x = x + model.positional_embedding.type(model.dtype)
-    x = x.permute(1, 0, 2)
-    x = _transformer_forward_until(model.transformer, x, end_layer=end_layer)
-    x = x.permute(1, 0, 2)
-    return x
-
-
-def extract_image_token_features(model, images, end_layer=-1):
-    if hasattr(model, "encode_image_tokens"):
-        return model.encode_image_tokens(images, end_layer=end_layer)
-
-    visual = model.visual
-    if hasattr(visual, "get_intermediate_tokens"):
-        return visual.get_intermediate_tokens(images.type(model.dtype), end_layer=end_layer)
-
-    raise AttributeError("Current CLIP visual encoder does not expose intermediate visual tokens.")
-
-
-def encode_text_from_token_features(model, text, token_features, start_layer=-1):
-    if hasattr(model, "encode_text_from_tokens"):
-        return model.encode_text_from_tokens(text, token_features, start_layer=start_layer)
-
-    x = token_features.type(model.dtype)
-    x = x.permute(1, 0, 2)
-    x = _transformer_forward_from(model.transformer, x, start_layer=start_layer)
-    x = x.permute(1, 0, 2)
-    x = model.ln_final(x).type(model.dtype)
-
-    end_id = getattr(model, "end_id", model.vocab_size - 1)
-    collect_ind = (text == end_id).nonzero()[:, 1]
-    x = x[torch.arange(x.size(0), device=x.device), collect_ind] @ model.text_projection
-    return x
-
 def flow_matching_inference(flow_net, q, e_m, num_steps=4, eps=1e-6):
     def l2norm(x):
         return x / x.norm(dim=-1, keepdim=True).clamp(min=eps)
@@ -1039,8 +972,8 @@ def evaluate_fashion_fm(model, img2text, args, source_loader, target_loader, flo
             # -----------------------------
             if fm is not None:
                 if getattr(args, "loss_type", "global") == "sequence":
-                    src_tokens = extract_text_token_features(m, caption_only, end_layer=-1)
-                    vis_tokens = extract_image_token_features(m, ref_images, end_layer=-1)
+                    src_tokens = m.encode_text_tokens(caption_only, end_layer=-1)
+                    vis_tokens = m.encode_image_tokens(ref_images, end_layer=-1)
 
                     if getattr(args, "seq_flow_drop_visual_cls", False):
                         vis_tokens = vis_tokens[:, 1:, :]
@@ -1056,8 +989,7 @@ def evaluate_fashion_fm(model, img2text, args, source_loader, target_loader, flo
                         src_mask=build_text_mask(caption_only),
                         num_steps=getattr(args, "flow_num_steps", 16),
                     )
-                    flow_feature = encode_text_from_token_features(
-                        m,
+                    flow_feature = m.encode_text_from_tokens(
                         caption_only,
                         flow_tokens,
                         start_layer=-1,
