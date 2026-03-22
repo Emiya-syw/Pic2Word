@@ -100,6 +100,77 @@ def encode_image_via_img2text(model, img2text, images, args):
     text_features = get_text_features(model, token_features, args)
     return text_features
 
+
+def build_text_mask(tokens):
+    return tokens.ne(0)
+
+
+def _transformer_forward_until(transformer, x, end_layer):
+    if hasattr(transformer, "forward_until"):
+        return transformer.forward_until(x, end_layer=end_layer)
+
+    blocks = transformer.resblocks
+    if end_layer is None:
+        end_layer = len(blocks)
+    if end_layer < 0:
+        end_layer = len(blocks) + end_layer
+    end_layer = max(0, min(end_layer, len(blocks)))
+    for block in blocks[:end_layer]:
+        x = block(x)
+    return x
+
+
+def _transformer_forward_from(transformer, x, start_layer):
+    if hasattr(transformer, "forward_from"):
+        return transformer.forward_from(x, start_layer=start_layer)
+
+    blocks = transformer.resblocks
+    if start_layer < 0:
+        start_layer = len(blocks) + start_layer
+    start_layer = max(0, min(start_layer, len(blocks)))
+    for block in blocks[start_layer:]:
+        x = block(x)
+    return x
+
+
+def extract_text_token_features(model, text, end_layer=-1):
+    if hasattr(model, "encode_text_tokens"):
+        return model.encode_text_tokens(text, end_layer=end_layer)
+
+    x = model.token_embedding(text).type(model.dtype)
+    x = x + model.positional_embedding.type(model.dtype)
+    x = x.permute(1, 0, 2)
+    x = _transformer_forward_until(model.transformer, x, end_layer=end_layer)
+    x = x.permute(1, 0, 2)
+    return x
+
+
+def extract_image_token_features(model, images, end_layer=-1):
+    if hasattr(model, "encode_image_tokens"):
+        return model.encode_image_tokens(images, end_layer=end_layer)
+
+    visual = model.visual
+    if hasattr(visual, "get_intermediate_tokens"):
+        return visual.get_intermediate_tokens(images.type(model.dtype), end_layer=end_layer)
+
+    raise AttributeError("Current CLIP visual encoder does not expose intermediate visual tokens.")
+
+
+def encode_text_from_token_features(model, text, token_features, start_layer=-1):
+    if hasattr(model, "encode_text_from_tokens"):
+        return model.encode_text_from_tokens(text, token_features, start_layer=start_layer)
+
+    x = token_features.type(model.dtype)
+    x = x.permute(1, 0, 2)
+    x = _transformer_forward_from(model.transformer, x, start_layer=start_layer)
+    x = x.permute(1, 0, 2)
+    x = model.ln_final(x).type(model.dtype)
+
+    end_id = getattr(model, "end_id", model.vocab_size - 1)
+    collect_ind = (text == end_id).nonzero()[:, 1]
+    x = x[torch.arange(x.size(0), device=x.device), collect_ind] @ model.text_projection
+    return x
+
 def flow_matching_inference(flow_net, q, e_m, num_steps=4, eps=1e-6):
     def l2norm(x):
         return x / x.norm(dim=-1, keepdim=True).clamp(min=eps)
@@ -124,6 +195,54 @@ def flow_matching_inference(flow_net, q, e_m, num_steps=4, eps=1e-6):
         v = torch.tanh(v)
         x_t = x_t + dt * v
         x_t = l2norm(x_t)
+
+    return x_t
+
+
+def sequence_flow_matching_inference(
+    flow_net,
+    src_tokens,
+    vis_tokens,
+    src_mask=None,
+    vis_mask=None,
+    num_steps=4,
+):
+    x_t = src_tokens.clone()
+    batch_size = src_tokens.size(0)
+    dt = 1.0 / num_steps
+
+    if src_mask is None:
+        src_mask = torch.ones(
+            src_tokens.shape[:2],
+            device=src_tokens.device,
+            dtype=torch.bool,
+        )
+    if vis_mask is None:
+        vis_mask = torch.ones(
+            vis_tokens.shape[:2],
+            device=vis_tokens.device,
+            dtype=torch.bool,
+        )
+
+    x_mask = torch.ones_like(src_mask, dtype=torch.bool)
+
+    for k in range(num_steps):
+        t = torch.full(
+            (batch_size, 1),
+            k / num_steps,
+            device=src_tokens.device,
+            dtype=src_tokens.dtype,
+        )
+        flow_output = flow_net(
+            x_t=x_t,
+            src_tokens=src_tokens,
+            vis_tokens=vis_tokens,
+            t=t,
+            src_mask=src_mask,
+            vis_mask=vis_mask,
+            x_mask=x_mask,
+        )
+        x_t = x_t + dt * flow_output.velocity
 
     return x_t
     
@@ -919,19 +1038,43 @@ def evaluate_fashion_fm(model, img2text, args, source_loader, target_loader, flo
             # y^  = flow(q, e_m)
             # -----------------------------
             if fm is not None:
-                # reverse
-                # e_m = encode_image_via_img2text(m, it, ref_images, args)
-                e_m = m.encode_image(ref_images)
-                q = m.encode_text(caption_only)
-                q = q / q.norm(dim=-1, keepdim=True).clamp(min=1e-6)
-                e_m = e_m / e_m.norm(dim=-1, keepdim=True).clamp(min=1e-6)
+                if getattr(args, "loss_type", "global") == "sequence":
+                    src_tokens = extract_text_token_features(m, caption_only, end_layer=-1)
+                    vis_tokens = extract_image_token_features(m, ref_images, end_layer=-1)
 
-                flow_feature = flow_matching_inference(
-                    fm,
-                    q,
-                    e_m,
-                    num_steps=getattr(args, "flow_num_steps", 16)
-                )
+                    if getattr(args, "seq_flow_drop_visual_cls", False):
+                        vis_tokens = vis_tokens[:, 1:, :]
+
+                    if getattr(args, "seq_flow_token_norm", False):
+                        src_tokens = F.normalize(src_tokens, dim=-1)
+                        vis_tokens = F.normalize(vis_tokens, dim=-1)
+
+                    flow_tokens = sequence_flow_matching_inference(
+                        fm,
+                        src_tokens=src_tokens,
+                        vis_tokens=vis_tokens,
+                        src_mask=build_text_mask(caption_only),
+                        num_steps=getattr(args, "flow_num_steps", 16),
+                    )
+                    flow_feature = encode_text_from_token_features(
+                        m,
+                        caption_only,
+                        flow_tokens,
+                        start_layer=-1,
+                    )
+                    flow_feature = flow_feature / flow_feature.norm(dim=-1, keepdim=True).clamp(min=1e-6)
+                else:
+                    e_m = m.encode_image(ref_images)
+                    q = m.encode_text(caption_only)
+                    q = q / q.norm(dim=-1, keepdim=True).clamp(min=1e-6)
+                    e_m = e_m / e_m.norm(dim=-1, keepdim=True).clamp(min=1e-6)
+
+                    flow_feature = flow_matching_inference(
+                        fm,
+                        q,
+                        e_m,
+                        num_steps=getattr(args, "flow_num_steps", 16)
+                    )
                 all_flow_features.append(flow_feature)
 
             all_caption_features.append(caption_features)

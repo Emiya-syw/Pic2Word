@@ -38,8 +38,9 @@ import sys
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 
 from model.clip import _transform, load
-from model.model import convert_weights, CLIP, IM2TEXT
+from model.model import convert_weights, CLIP, IM2TEXT, VisualTransformer
 from model.residual_flow_matching_module import ConditionalFlowNet
+from model.seq_flow_matching_module import TokenFlowNet
 
 from eval_utils import (
     evaluate_imgnet_retrieval,
@@ -150,12 +151,31 @@ def build_flow_net(model, args):
     """
     Build flow net for compatibility with Flow Matching checkpoints.
     """
-    flow_embed_dim = getattr(model, "embed_dim", 1024)
-    flow_net = ConditionalFlowNet(
-        dim=flow_embed_dim,
-        time_dim=args.flow_time_dim,
-        hidden_dim=args.flow_hidden_dim,
-    )
+    if getattr(args, "loss_type", "global") == "global":
+        flow_embed_dim = getattr(model, "embed_dim", 1024)
+        flow_net = ConditionalFlowNet(
+            dim=flow_embed_dim,
+            time_dim=args.flow_time_dim,
+            hidden_dim=args.flow_hidden_dim,
+        )
+    elif getattr(args, "loss_type", "global") == "sequence":
+        if not isinstance(model.visual, VisualTransformer):
+            raise ValueError(
+                "Sequence flow matching evaluation requires a ViT-based CLIP visual encoder."
+            )
+        flow_net = TokenFlowNet(
+            text_dim=model.transformer_width,
+            vis_dim=model.visual.conv1.out_channels,
+            model_dim=args.seq_flow_model_dim,
+            depth=args.seq_flow_depth,
+            num_heads=args.seq_flow_heads,
+            time_dim=args.flow_time_dim,
+            num_vis_queries=args.seq_flow_num_vis_queries,
+            dropout=args.seq_flow_dropout,
+            predict_residual=args.seq_flow_predict_residual,
+        )
+    else:
+        raise ValueError(f"Unsupported loss_type: {args.loss_type}")
     return flow_net
 
 
