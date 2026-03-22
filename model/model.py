@@ -245,14 +245,6 @@ class Transformer(nn.Module):
             x = block(x)
         return x
 
-    def forward_from(self, x: torch.Tensor, start_layer: int = 0):
-        if start_layer < 0:
-            start_layer = len(self.resblocks) + start_layer
-        start_layer = max(0, min(start_layer, len(self.resblocks)))
-        for block in self.resblocks[start_layer:]:
-            x = block(x)
-        return x
-
 
 class VisualTransformer(nn.Module):
     def __init__(self, input_resolution: int, patch_size: int, width: int, layers: int, heads: int, output_dim: int):
@@ -464,17 +456,6 @@ class CLIP(nn.Module):
         x = x.permute(1, 0, 2)  # NLD -> LND
         x = self.transformer.forward_until(x, end_layer=end_layer)
         x = x.permute(1, 0, 2)  # LND -> NLD
-        return x
-
-    def encode_text_from_tokens(self, text, token_features, start_layer: int = -1):
-        x = token_features.type(self.dtype)
-        x = x.permute(1, 0, 2)  # NLD -> LND
-        x = self.transformer.forward_from(x, start_layer=start_layer)
-        x = x.permute(1, 0, 2)  # LND -> NLD
-        x = self.ln_final(x).type(self.dtype)
-        collect_ind = text == self.end_id
-        collect_ind = collect_ind.nonzero()[:, 1]
-        x = x[torch.arange(x.size(0)), collect_ind] @ self.text_projection
         return x
     
 
