@@ -103,13 +103,51 @@ def build_text_mask(tokens):
     return tokens.ne(0)
 
 
+def _transformer_forward_until(transformer, x, end_layer):
+    if hasattr(transformer, "forward_until"):
+        return transformer.forward_until(x, end_layer=end_layer)
+
+    blocks = transformer.resblocks
+    if end_layer is None:
+        end_layer = len(blocks)
+    if end_layer < 0:
+        end_layer = len(blocks) + end_layer
+    end_layer = max(0, min(end_layer, len(blocks)))
+    for block in blocks[:end_layer]:
+        x = block(x)
+    return x
+
+
+def extract_text_token_features(model, text, end_layer=-1):
+    if hasattr(model, "encode_text_tokens"):
+        return model.encode_text_tokens(text, end_layer=end_layer)
+
+    x = model.token_embedding(text).type(model.dtype)
+    x = x + model.positional_embedding.type(model.dtype)
+    x = x.permute(1, 0, 2)
+    x = _transformer_forward_until(model.transformer, x, end_layer=end_layer)
+    x = x.permute(1, 0, 2)
+    return x
+
+
+def extract_image_token_features(model, images, end_layer=-1):
+    if hasattr(model, "encode_image_tokens"):
+        return model.encode_image_tokens(images, end_layer=end_layer)
+
+    visual = model.visual
+    if hasattr(visual, "get_intermediate_tokens"):
+        return visual.get_intermediate_tokens(images.type(model.dtype), end_layer=end_layer)
+
+    raise AttributeError("Current CLIP visual encoder does not expose intermediate visual tokens.")
+
+
 def build_token_level_inputs(model, ref_images, mod_texts, target_texts, args):
     src_tokens = tokenize_to_device(mod_texts, args)
     tgt_tokens = tokenize_to_device(target_texts, args)
 
-    src_token_features = model.encode_text_tokens(src_tokens, end_layer=-1)
-    tgt_token_features = model.encode_text_tokens(tgt_tokens, end_layer=-1)
-    vis_token_features = model.encode_image_tokens(ref_images, end_layer=-1)
+    src_token_features = extract_text_token_features(model, src_tokens, end_layer=-1)
+    tgt_token_features = extract_text_token_features(model, tgt_tokens, end_layer=-1)
+    vis_token_features = extract_image_token_features(model, ref_images, end_layer=-1)
 
     if args.seq_flow_drop_visual_cls:
         vis_token_features = vis_token_features[:, 1:, :]
