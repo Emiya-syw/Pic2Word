@@ -258,9 +258,15 @@ from torch.utils.data import Dataset
 class FashionIQ_FM(Dataset):
     """
     FashionIQ dataset returning:
-        1. reference image
-        2. modification instruction
-        3. target description
+        train:
+            1. reference image
+            2. modification instruction tokens
+            3. target description tokens
+        eval:
+            1. reference image
+            2. target image
+            3. modification instruction string
+            4. target description string
     """
 
     def __init__(self, cloth, transforms, split='train', root='./data'):
@@ -269,6 +275,7 @@ class FashionIQ_FM(Dataset):
         self.transforms = transforms
         self.cloth = cloth
         self.split = split
+        self.is_train = split == 'train'
 
         self.json_file = os.path.join(
             root_iq,
@@ -280,6 +287,7 @@ class FashionIQ_FM(Dataset):
         logging.debug(f'Loading json data from {self.json_file}')
 
         self.ref_imgs = []
+        self.target_imgs = []
         self.ref_caps = []
         self.target_texts = []
 
@@ -295,8 +303,13 @@ class FashionIQ_FM(Dataset):
         for d in data:
             try:
                 ref_path = os.path.join(self.root_img, d['candidate'] + ".png")
+                target_path = os.path.join(self.root_img, d['target'] + ".png")
                 if not os.path.exists(ref_path):
                     logging.warning(f"Missing image: {ref_path}")
+                    dropped_missing_img += 1
+                    continue
+                if not os.path.exists(target_path):
+                    logging.warning(f"Missing image: {target_path}")
                     dropped_missing_img += 1
                     continue
 
@@ -312,6 +325,7 @@ class FashionIQ_FM(Dataset):
                     continue
 
                 self.ref_imgs.append(ref_path)
+                self.target_imgs.append(target_path)
                 self.ref_caps.append((cap1, cap2))
                 self.target_texts.append(target_cap)
 
@@ -340,8 +354,14 @@ class FashionIQ_FM(Dataset):
         target_cap = self.target_texts[idx]
 
         modification_text = self.build_modification_text(cap1, cap2)
-        target_text = self.build_target_text(target_cap)
-        return ref_image, tokenize(modification_text)[0], tokenize(target_text)[0]
+        if self.is_train:
+            target_text = self.build_target_text(target_cap)
+            return ref_image, tokenize(modification_text)[0], tokenize(target_text)[0]
+
+        with Image.open(self.target_imgs[idx]) as img:
+            target_image = self.transforms(img.convert("RGB"))
+
+        return ref_image, target_image, modification_text, target_cap
 
 class CC3M_FM(Dataset):
     """
