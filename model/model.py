@@ -235,6 +235,16 @@ class Transformer(nn.Module):
     def forward(self, x: torch.Tensor):
         return self.resblocks(x)
 
+    def forward_until(self, x: torch.Tensor, end_layer: int = None):
+        if end_layer is None:
+            end_layer = len(self.resblocks)
+        if end_layer < 0:
+            end_layer = len(self.resblocks) + end_layer
+        end_layer = max(0, min(end_layer, len(self.resblocks)))
+        for block in self.resblocks[:end_layer]:
+            x = block(x)
+        return x
+
 
 class VisualTransformer(nn.Module):
     def __init__(self, input_resolution: int, patch_size: int, width: int, layers: int, heads: int, output_dim: int):
@@ -281,6 +291,18 @@ class VisualTransformer(nn.Module):
         x = self.ln_pre(x)
         x = x.permute(1, 0, 2)  # NLD -> LND
         x = self.transformer(x)
+        x = x.permute(1, 0, 2)  # LND -> NLD
+        return x
+
+    def get_intermediate_tokens(self, x: torch.Tensor, end_layer: int = -1):
+        x = self.conv1(x)  # shape = [*, width, grid, grid]
+        x = x.reshape(x.shape[0], x.shape[1], -1)  # shape = [*, width, grid ** 2]
+        x = x.permute(0, 2, 1)  # shape = [*, grid ** 2, width]
+        x = torch.cat([self.class_embedding.to(x.dtype) + torch.zeros(x.shape[0], 1, x.shape[-1], dtype=x.dtype, device=x.device), x], dim=1)  # shape = [*, grid ** 2 + 1, width]
+        x = x + self.positional_embedding.to(x.dtype)
+        x = self.ln_pre(x)
+        x = x.permute(1, 0, 2)  # NLD -> LND
+        x = self.transformer.forward_until(x, end_layer=end_layer)
         x = x.permute(1, 0, 2)  # LND -> NLD
         return x
 
@@ -403,6 +425,16 @@ class CLIP(nn.Module):
     def encode_image(self, image):
         return self.visual(image.type(self.dtype))
 
+    def encode_image_tokens(self, image, end_layer: int = -1):
+        if not isinstance(self.visual, VisualTransformer):
+            raise NotImplementedError(
+                "Sequence flow matching currently requires a ViT-based CLIP visual encoder."
+            )
+        return self.visual.get_intermediate_tokens(
+            image.type(self.dtype),
+            end_layer=end_layer,
+        )
+
     def encode_text(self, text):
         x = self.token_embedding(text).type(self.dtype)  # [batch_size, n_ctx, d_model]
 
@@ -416,6 +448,14 @@ class CLIP(nn.Module):
         collect_ind = text == self.end_id 
         collect_ind = collect_ind.nonzero()[:, 1]
         x = x[torch.arange(x.size(0)), collect_ind] @ self.text_projection
+        return x
+
+    def encode_text_tokens(self, text, end_layer: int = -1):
+        x = self.token_embedding(text).type(self.dtype)  # [batch_size, n_ctx, d_model]
+        x = x + self.positional_embedding.type(self.dtype)
+        x = x.permute(1, 0, 2)  # NLD -> LND
+        x = self.transformer.forward_until(x, end_layer=end_layer)
+        x = x.permute(1, 0, 2)  # LND -> NLD
         return x
     
 

@@ -17,6 +17,7 @@ import time
 import logging
 import wandb
 import torch
+import torch.nn.functional as F
 from torch.cuda.amp import autocast
 from third_party.open_clip.clip import tokenize
 from utils import is_master
@@ -96,6 +97,46 @@ def encode_image_batch(model, images, args):
     """
     image_features = model.encode_image(images)
     return image_features
+
+
+def build_text_mask(tokens):
+    return tokens.ne(0)
+
+
+def build_token_level_inputs(model, ref_images, mod_texts, target_texts, args):
+    src_tokens = tokenize_to_device(mod_texts, args)
+    tgt_tokens = tokenize_to_device(target_texts, args)
+
+    src_token_features = model.encode_text_tokens(src_tokens, end_layer=-1)
+    tgt_token_features = model.encode_text_tokens(tgt_tokens, end_layer=-1)
+    vis_token_features = model.encode_image_tokens(ref_images, end_layer=-1)
+
+    if args.seq_flow_drop_visual_cls:
+        vis_token_features = vis_token_features[:, 1:, :]
+
+    if args.seq_flow_token_norm:
+        src_token_features = F.normalize(src_token_features, dim=-1)
+        tgt_token_features = F.normalize(tgt_token_features, dim=-1)
+        vis_token_features = F.normalize(vis_token_features, dim=-1)
+
+    src_mask = build_text_mask(src_tokens)
+    tgt_mask = build_text_mask(tgt_tokens)
+    token_mask = src_mask | tgt_mask
+    vis_mask = torch.ones(
+        vis_token_features.shape[:2],
+        device=vis_token_features.device,
+        dtype=torch.bool,
+    )
+
+    return {
+        "src_tokens": src_token_features,
+        "tgt_tokens": tgt_token_features,
+        "vis_tokens": vis_token_features,
+        "src_mask": src_mask,
+        "tgt_mask": tgt_mask,
+        "token_mask": token_mask,
+        "vis_mask": vis_mask,
+    }
 
 def get_text_features(model, token_features, args):
     """
@@ -215,36 +256,107 @@ def train(model, img2text, flow_net, criterion, data, epoch, optimizer, scaler, 
         # y   : target/generated caption -> text encoder
         # --------------------------------------------------
         with torch.no_grad():
-            # reverse
-            # e_m = encode_image_via_img2text(m, t, ref_images, args)  # [B, D]
-            e_m = encode_image_batch(m, ref_images, args)
-            q = encode_text_batch(m, mod_texts, args)            # [B, D]
-            y = encode_text_batch(m, target_texts, args)           # [B, D]
+            if args.loss_type == "global":
+                e_m = encode_image_batch(m, ref_images, args)
+                q = encode_text_batch(m, mod_texts, args)
+                y = encode_text_batch(m, target_texts, args)
 
-            # q = encode_image_batch(m, ref_images, args)
-            # e_m = encode_text_batch(m, mod_texts, args)
-            # y = encode_image_batch(m, target_images, args)
-            
-
-            # normalize for stable metric alignment
-            q = q / q.norm(dim=-1, keepdim=True).clamp(min=1e-6)
-            e_m = e_m / e_m.norm(dim=-1, keepdim=True).clamp(min=1e-6)
-            y = y / y.norm(dim=-1, keepdim=True).clamp(min=1e-6)
+                q = q / q.norm(dim=-1, keepdim=True).clamp(min=1e-6)
+                e_m = e_m / e_m.norm(dim=-1, keepdim=True).clamp(min=1e-6)
+                y = y / y.norm(dim=-1, keepdim=True).clamp(min=1e-6)
+            elif args.loss_type == "sequence":
+                seq_inputs = build_token_level_inputs(
+                    model=m,
+                    ref_images=ref_images,
+                    mod_texts=mod_texts,
+                    target_texts=target_texts,
+                    args=args,
+                )
+            else:
+                raise ValueError(f"Unsupported loss_type: {args.loss_type}")
 
         # --------------------------------------------------
         # 3. flow matching loss
         # --------------------------------------------------
         if args.precision == "amp":
             with autocast():
-                loss_dict = criterion(q, y, e_m)
-                total_loss = loss_dict["loss"]
+                if args.loss_type == "global":
+                    loss_dict = criterion(q, y, e_m)
+                    total_loss = loss_dict["loss"]
+                else:
+                    x0 = seq_inputs["src_tokens"]
+                    x1 = seq_inputs["tgt_tokens"]
+                    t_sample = torch.rand(x0.size(0), 1, device=x0.device, dtype=x0.dtype)
+                    x_t = (1.0 - t_sample.unsqueeze(1)) * x0 + t_sample.unsqueeze(1) * x1
+                    flow_output = flow_net(
+                        x_t=x_t,
+                        src_tokens=x0,
+                        vis_tokens=seq_inputs["vis_tokens"],
+                        t=t_sample,
+                        src_mask=seq_inputs["src_mask"],
+                        vis_mask=seq_inputs["vis_mask"],
+                        x_mask=seq_inputs["token_mask"],
+                    )
+                    loss_output = criterion(
+                        x0=x0,
+                        x1=x1,
+                        x_t=x_t,
+                        velocity=flow_output.velocity,
+                        t=t_sample,
+                        token_mask=seq_inputs["token_mask"],
+                        pred_x1_direct=flow_output.pred_x1,
+                    )
+                    total_loss = loss_output.loss
+                    loss_dict = {
+                        "loss": total_loss,
+                        "loss_fm": loss_output.loss_dict["fm"],
+                        "loss_end": loss_output.loss_dict["end"],
+                        "loss_ret": torch.zeros_like(loss_output.loss_dict["tok"]),
+                        "loss_tok": loss_output.loss_dict["tok"],
+                        "loss_keep": loss_output.loss_dict["keep"],
+                        "loss_direct_end": loss_output.loss_dict["direct_end"],
+                    }
 
             scaler.scale(total_loss).backward()
             scaler.step(optimizer)
             scaler.update()
         else:
-            loss_dict = criterion(q, y, e_m)
-            total_loss = loss_dict["loss"]
+            if args.loss_type == "global":
+                loss_dict = criterion(q, y, e_m)
+                total_loss = loss_dict["loss"]
+            else:
+                x0 = seq_inputs["src_tokens"]
+                x1 = seq_inputs["tgt_tokens"]
+                t_sample = torch.rand(x0.size(0), 1, device=x0.device, dtype=x0.dtype)
+                x_t = (1.0 - t_sample.unsqueeze(1)) * x0 + t_sample.unsqueeze(1) * x1
+                flow_output = flow_net(
+                    x_t=x_t,
+                    src_tokens=x0,
+                    vis_tokens=seq_inputs["vis_tokens"],
+                    t=t_sample,
+                    src_mask=seq_inputs["src_mask"],
+                    vis_mask=seq_inputs["vis_mask"],
+                    x_mask=seq_inputs["token_mask"],
+                )
+                loss_output = criterion(
+                    x0=x0,
+                    x1=x1,
+                    x_t=x_t,
+                    velocity=flow_output.velocity,
+                    t=t_sample,
+                    token_mask=seq_inputs["token_mask"],
+                    pred_x1_direct=flow_output.pred_x1,
+                )
+                total_loss = loss_output.loss
+                loss_dict = {
+                    "loss": total_loss,
+                    "loss_fm": loss_output.loss_dict["fm"],
+                    "loss_end": loss_output.loss_dict["end"],
+                    "loss_ret": torch.zeros_like(loss_output.loss_dict["tok"]),
+                    "loss_tok": loss_output.loss_dict["tok"],
+                    "loss_keep": loss_output.loss_dict["keep"],
+                    "loss_direct_end": loss_output.loss_dict["direct_end"],
+                }
             total_loss.backward()
             optimizer.step()
 
@@ -255,10 +367,18 @@ def train(model, img2text, flow_net, criterion, data, epoch, optimizer, scaler, 
         # 4. logging
         # --------------------------------------------------
         if is_master(args) and (i % 100) == 0:
-            batch_size = q.size(0)
+            batch_size = ref_images.size(0)
             num_samples = i * batch_size * args.world_size
             samples_per_epoch = dataloader.num_samples
             percent_complete = 100.0 * i / num_batches_per_epoch
+
+            extra_log = ""
+            if args.loss_type == "sequence":
+                extra_log = (
+                    f"\tTok: {loss_dict['loss_tok'].item():.6f}"
+                    f"\tKeep: {loss_dict['loss_keep'].item():.6f}"
+                    f"\tDirectEnd: {loss_dict['loss_direct_end'].item():.6f}"
+                )
 
             logging.info(
                 f"Train Epoch: {epoch} [{num_samples}/{samples_per_epoch} ({percent_complete:.0f}%)]\t"
@@ -266,6 +386,7 @@ def train(model, img2text, flow_net, criterion, data, epoch, optimizer, scaler, 
                 f"FM: {loss_dict['loss_fm'].item():.6f}\t"
                 f"End: {loss_dict['loss_end'].item():.6f}\t"
                 f"Ret: {loss_dict['loss_ret'].item():.6f}\t"
+                f"{extra_log}"
                 f"Data (t) {data_time:.3f}\tBatch (t) {batch_time:.3f}\t"
                 f"LR: {optimizer.param_groups[0]['lr']:.6e}"
             )
@@ -280,6 +401,13 @@ def train(model, img2text, flow_net, criterion, data, epoch, optimizer, scaler, 
                 "batch_time": batch_time,
                 "lr": optimizer.param_groups[0]["lr"],
             }
+
+            if args.loss_type == "sequence":
+                log_data.update({
+                    "loss_tok": loss_dict["loss_tok"].item(),
+                    "loss_keep": loss_dict["loss_keep"].item(),
+                    "loss_direct_end": loss_dict["loss_direct_end"].item(),
+                })
 
             for name, val in log_data.items():
                 tag = "train/" + name
