@@ -255,11 +255,13 @@ def main():
 
     # get the name of the experiments
     if args.name is None:
-        args.name = (f"lr={args.lr}_"
-            "wd={args.wd}_"
-            "agg={args.aggregate}_"
-            "model={args.model}_"
-            "batchsize={args.batch_size}_workers={args.workers}")
+        args.name = (
+            f"lr={args.lr}_"
+            f"wd={args.wd}_"
+            f"agg={args.aggregate}_"
+            f"model={args.model}_"
+            f"batchsize={args.batch_size}_workers={args.workers}"
+        )
         import pdb
         pdb.set_trace
         if args.time_suffix:
