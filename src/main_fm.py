@@ -38,7 +38,7 @@ sys.path.insert(0, "/home/sunyw/CIR/Pic2Word")
 
 from third_party.open_clip.scheduler import cosine_lr
 from model.clip import _transform, load
-from model.model import convert_weights, CLIP, IM2TEXT
+from model.model import convert_weights, CLIP, IM2TEXT, VisualTransformer
 from trainer_fm import train
 from data import get_data
 from params import parse_args
@@ -227,12 +227,31 @@ def main_worker(gpu, ngpus_per_node, log_queue, args):
     # 3. Flow net
     # Only this module is optimized
     # --------------------------------------------------
-    flow_embed_dim = getattr(model, "embed_dim", 1024)
-    flow_net = ConditionalFlowNet(
-        dim=flow_embed_dim,
-        time_dim=args.flow_time_dim,
-        hidden_dim=args.flow_hidden_dim,
-    )
+    if args.loss_type == "global":
+        flow_embed_dim = getattr(model, "embed_dim", 1024)
+        flow_net = ConditionalFlowNet(
+            dim=flow_embed_dim,
+            time_dim=args.flow_time_dim,
+            hidden_dim=args.flow_hidden_dim,
+        )
+    elif args.loss_type == "sequence":
+        if not isinstance(model.visual, VisualTransformer):
+            raise ValueError(
+                "Sequence flow matching requires a ViT-based CLIP model so that visual token sequences are available."
+            )
+        flow_net = TokenFlowNet(
+            text_dim=model.transformer_width,
+            vis_dim=model.visual.conv1.out_channels,
+            model_dim=args.seq_flow_model_dim,
+            depth=args.seq_flow_depth,
+            num_heads=args.seq_flow_heads,
+            time_dim=args.flow_time_dim,
+            num_vis_queries=args.seq_flow_num_vis_queries,
+            dropout=args.seq_flow_dropout,
+            predict_residual=args.seq_flow_predict_residual,
+        )
+    else:
+        raise ValueError(f"Unsupported loss_type: {args.loss_type}")
 
     # --------------------------------------------------
     # 4. Freeze modules that should not be updated
@@ -297,7 +316,16 @@ def main_worker(gpu, ngpus_per_node, log_queue, args):
             normalize=True,
         ).to(device)
     elif args.loss_type == "sequence":
-        cirterion = TokenFlowMatchingLoss().to(device)
+        criterion = TokenFlowMatchingLoss(
+            lambda_fm=args.lambda_fm,
+            lambda_end=args.lambda_end,
+            lambda_tok=args.lambda_tok,
+            lambda_keep=args.lambda_keep,
+            lambda_direct_end=args.lambda_direct_end,
+            keep_threshold=args.flow_keep_threshold,
+        ).to(device)
+    else:
+        raise ValueError(f"Unsupported loss_type: {args.loss_type}")
 
     # --------------------------------------------------
     # 8. Optimizer / Scheduler
@@ -571,6 +599,7 @@ def main():
             f"wd={args.wd}_"
             f"model={args.model}_"
             f"bs={args.batch_size}_"
+            f"flow={args.loss_type}_"
             f"flowhd={args.flow_hidden_dim}_"
             f"steps={args.flow_num_steps}"
         )

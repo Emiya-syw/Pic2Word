@@ -301,6 +301,98 @@ def parse_args():
         type=lambda x: [int(a) for a in x.split(",")],
         help="In DP, which GPUs to use for multigpu training",
     )
+    parser.add_argument(
+        "--loss-type",
+        type=str,
+        choices=["global", "sequence"],
+        default="global",
+        help="Choose global embedding flow matching or sequence token flow matching.",
+    )
+    parser.add_argument(
+        "--flow-hidden-dim",
+        type=int,
+        default=4096,
+        help="Hidden dimension for the global ConditionalFlowNet.",
+    )
+    parser.add_argument(
+        "--flow-time-dim",
+        type=int,
+        default=128,
+        help="Time embedding dimension for flow matching networks.",
+    )
+    parser.add_argument(
+        "--flow-num-steps",
+        type=int,
+        default=4,
+        help="Euler integration steps for global flow matching.",
+    )
+    parser.add_argument(
+        "--flow-temperature",
+        type=float,
+        default=0.07,
+        help="Temperature used by the global retrieval loss.",
+    )
+    parser.add_argument("--lambda-fm", type=float, default=1.0, help="Weight of the flow matching loss.")
+    parser.add_argument("--lambda-end", type=float, default=1.0, help="Weight of the endpoint reconstruction loss.")
+    parser.add_argument("--lambda-ret", type=float, default=0.05, help="Weight of the global retrieval loss.")
+    parser.add_argument("--lambda-mid", type=float, default=0.5, help="Reserved weight for mid-point losses.")
+    parser.add_argument("--lambda-tok", type=float, default=0.2, help="Weight of the sequence token cosine loss.")
+    parser.add_argument("--lambda-keep", type=float, default=0.5, help="Weight of the unchanged-token preservation loss.")
+    parser.add_argument("--lambda-direct-end", type=float, default=0.0, help="Weight of the optional direct x1 prediction loss.")
+    parser.add_argument(
+        "--flow-keep-threshold",
+        type=float,
+        default=0.98,
+        help="Cosine threshold used to detect unchanged tokens in sequence training.",
+    )
+    parser.add_argument(
+        "--seq-flow-model-dim",
+        type=int,
+        default=768,
+        help="Hidden dimension of the token-level flow network.",
+    )
+    parser.add_argument(
+        "--seq-flow-depth",
+        type=int,
+        default=6,
+        help="Number of TokenFlowBlock layers.",
+    )
+    parser.add_argument(
+        "--seq-flow-heads",
+        type=int,
+        default=8,
+        help="Number of attention heads in TokenFlowNet.",
+    )
+    parser.add_argument(
+        "--seq-flow-num-vis-queries",
+        type=int,
+        default=16,
+        help="Number of visual query tokens used by the visual resampler.",
+    )
+    parser.add_argument(
+        "--seq-flow-dropout",
+        type=float,
+        default=0.1,
+        help="Dropout used inside TokenFlowNet.",
+    )
+    parser.add_argument(
+        "--seq-flow-predict-residual",
+        action="store_true",
+        default=False,
+        help="If set, TokenFlowNet also predicts x1 directly via a residual head.",
+    )
+    parser.add_argument(
+        "--seq-flow-token-norm",
+        action="store_true",
+        default=False,
+        help="L2-normalize penultimate-layer token embeddings before sequence flow matching.",
+    )
+    parser.add_argument(
+        "--seq-flow-drop-visual-cls",
+        action="store_true",
+        default=False,
+        help="Drop the CLS token from the visual token sequence during sequence flow matching.",
+    )
     args = parser.parse_args()
     args.aggregate = not args.skip_aggregate
 
