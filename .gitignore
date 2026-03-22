@@ -1,0 +1,67 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# environment
+.venv/
+venv/
+env/
+conda_env/
+*.log
+
+# Jupyter
+.ipynb_checkpoints/
+
+# model weights
+*.pt
+*.pth
+*.bin
+*.ckpt
+*.safetensors
+*.onnx
+
+# data files
+*.csv
+*.tsv
+*.jsonl
+*.parquet
+*.h5
+*.hdf5
+*.npz
+*.npy
+*.pkl
+
+# images / videos / large assets
+*.jpg
+*.jpeg
+*.png
+*.mp4
+*.avi
+*.mov
+*.mkv
+*.webm
+
+# common folders
+data/
+datasets/
+dataset/
+checkpoints/
+weights/
+outputs/
+results/
+logs/
+cache/
+tmp/
+
+# secrets
+.env
+*.pem
+*.key
+*.json
+
+# dir
+/weights
+/data
+/logs

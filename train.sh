@@ -1,0 +1,12 @@
+python -u src/main.py \
+    --save-frequency 1 \
+    --train-data="/home/sunyw/composed_image_retrieval/cc3m/cc3m_train.tsv"  \
+    --warmup 10000 \
+    --batch-size=512 \
+    --lr=1e-4 \
+    --wd=0.1 \
+    --epochs=30 \
+    --workers=8 \
+    --openai-pretrained \
+    --model ViT-L/14 \
+    --csv-caption-key "caption"
