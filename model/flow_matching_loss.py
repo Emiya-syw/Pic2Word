@@ -53,11 +53,12 @@ class FlowMatchingLoss(nn.Module):
         self.gamma = gamma
         self.eps = eps
 
-    def _maybe_normalize_inputs(self, q, y, e_m):
+    def _maybe_normalize_inputs(self, q, y, e_m=None):
         if self.normalize:
             q = l2norm(q, eps=self.eps)
             y = l2norm(y, eps=self.eps)
-            e_m = l2norm(e_m, eps=self.eps)
+            if e_m is not None:
+                e_m = l2norm(e_m, eps=self.eps)
         return q, y, e_m
 
     def _alpha(self, t):
@@ -85,11 +86,11 @@ class FlowMatchingLoss(nn.Module):
         pass delta = x - q0 instead of raw q0.
         """
         delta = x - q0
-        v = self.flow_net(x, delta, e_m, t)
+        v = self.flow_net(x, delta=delta, e_m=e_m, t=t)
         v = torch.tanh(v)
         return v
 
-    def integrate_flow(self, q, e_m):
+    def integrate_flow(self, q, e_m=None):
         """
         Simple Euler integration with per-step normalization.
         """
@@ -114,11 +115,11 @@ class FlowMatchingLoss(nn.Module):
 
         return x
 
-    def forward(self, q, y, e_m):
+    def forward(self, q, y, e_m=None):
         """
         q   : source/query feature [B, D]
         y   : target/modified feature [B, D]
-        e_m : modification text feature [B, D]
+        e_m : optional condition feature [B, D]
         """
         q, y, e_m = self._maybe_normalize_inputs(q, y, e_m)
 

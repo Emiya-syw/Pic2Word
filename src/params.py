@@ -336,7 +336,77 @@ def parse_args():
         "--global-start-noise-std",
         type=float,
         default=0.0,
-        help="Gaussian noise std added to the global-loss start embedding (modification text) before normalization.",
+        help="Gaussian noise std added to the global-loss start embedding before normalization.",
+    )
+    parser.add_argument(
+        "--global-flow-conditioning",
+        type=str,
+        choices=["enabled", "disabled"],
+        default="enabled",
+        help="Whether the global flow net should receive an extra condition embedding.",
+    )
+    parser.add_argument(
+        "--global-flow-start-source",
+        type=str,
+        choices=["text", "image", "composed"],
+        default="text",
+        help="Which feature to use as the start state of the global flow.",
+    )
+    parser.add_argument(
+        "--global-flow-condition-source",
+        type=str,
+        choices=["text", "image", "composed"],
+        default="image",
+        help="Which feature to use as the extra global flow condition when conditioning is enabled.",
+    )
+    parser.add_argument(
+        "--global-flow-compose-method",
+        type=str,
+        choices=["add", "mean", "pic2word"],
+        default="add",
+        help="How to build a composed global flow feature when source=composed.",
+    )
+    parser.add_argument(
+        "--global-flow-start-text-weight",
+        type=float,
+        default=1.0,
+        help="Text weight used when start-source=composed with add/mean composition.",
+    )
+    parser.add_argument(
+        "--global-flow-start-image-weight",
+        type=float,
+        default=1.0,
+        help="Image weight used when start-source=composed with add/mean composition.",
+    )
+    parser.add_argument(
+        "--global-flow-condition-text-weight",
+        type=float,
+        default=1.0,
+        help="Text weight used when condition-source=composed with add/mean composition.",
+    )
+    parser.add_argument(
+        "--global-flow-condition-image-weight",
+        type=float,
+        default=1.0,
+        help="Image weight used when condition-source=composed with add/mean composition.",
+    )
+    parser.add_argument(
+        "--global-flow-pic2word-marker",
+        type=str,
+        default="*",
+        help="Marker token inserted in prompts when compose-method=pic2word.",
+    )
+    parser.add_argument(
+        "--global-flow-disable-cond-gate",
+        action="store_true",
+        default=False,
+        help="Disable the condition gate inside the global flow MLP when conditioning is enabled.",
+    )
+    parser.add_argument(
+        "--global-flow-disable-delta",
+        action="store_true",
+        default=False,
+        help="Disable delta=x_t-x0 input in the global flow net.",
     )
     parser.add_argument("--lambda-fm", type=float, default=1.0, help="Weight of the flow matching loss.")
     parser.add_argument("--lambda-end", type=float, default=1.0, help="Weight of the endpoint reconstruction loss.")
@@ -400,6 +470,8 @@ def parse_args():
         help="Drop the CLS token from the visual token sequence during sequence flow matching.",
     )
     args = parser.parse_args()
+    args.global_flow_use_cond_gate = not args.global_flow_disable_cond_gate
+    args.global_flow_use_delta = not args.global_flow_disable_delta
     args.aggregate = not args.skip_aggregate
 
     # If some params are not passed, we use the default values based on model name.
