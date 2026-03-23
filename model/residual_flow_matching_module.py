@@ -69,16 +69,20 @@ class ConditionalFlowNet(nn.Module):
         hidden_dim=2048,
         num_blocks=4,
         dropout=0.0,
+        use_delta=True,
+        use_condition=True,
         use_cond_gate=True,
         out_norm=False,
     ):
         super().__init__()
         self.time_embed = TimeEmbedding(time_dim)
-        self.use_cond_gate = use_cond_gate
+        self.use_delta = use_delta
+        self.use_condition = use_condition
+        self.use_cond_gate = use_cond_gate and use_condition
         self.out_norm = out_norm
 
-        # x_t + delta + e_m + t_emb
-        in_dim = dim * 3 + time_dim
+        feature_inputs = 1 + int(self.use_delta) + int(self.use_condition)
+        in_dim = dim * feature_inputs + time_dim
 
         self.input_proj = nn.Sequential(
             nn.Linear(in_dim, hidden_dim),
@@ -90,30 +94,47 @@ class ConditionalFlowNet(nn.Module):
             for _ in range(num_blocks)
         ])
 
-        if use_cond_gate:
-            # delta + e_m + t_emb
+        self.gate = None
+        if self.use_cond_gate:
+            gate_inputs = int(self.use_delta) + int(self.use_condition)
             self.gate = nn.Sequential(
-                nn.LayerNorm(dim * 2 + time_dim),
-                nn.Linear(dim * 2 + time_dim, hidden_dim),
+                nn.LayerNorm(dim * gate_inputs + time_dim),
+                nn.Linear(dim * gate_inputs + time_dim, hidden_dim),
                 nn.Sigmoid(),
             )
 
         self.final_norm = nn.LayerNorm(hidden_dim)
         self.out_proj = nn.Linear(hidden_dim, dim)
 
-    def forward(self, x_t, delta, e_m, t):
+    def forward(self, x_t, delta=None, e_m=None, t=None):
         # x_t, delta, e_m: [B, D]
         # t: [B, 1]
+        if t is None:
+            raise ValueError("Time input t must be provided to ConditionalFlowNet.")
 
         t_emb = self.time_embed(t)  # [B, time_dim]
 
-        # main input
-        h = torch.cat([x_t, delta, e_m, t_emb], dim=-1)  # [B, 3D + T]
+        feature_parts = [x_t]
+        if self.use_delta:
+            if delta is None:
+                raise ValueError("delta must be provided when use_delta=True.")
+            feature_parts.append(delta)
+        if self.use_condition:
+            if e_m is None:
+                raise ValueError("e_m must be provided when use_condition=True.")
+            feature_parts.append(e_m)
+
+        h = torch.cat(feature_parts + [t_emb], dim=-1)
         h = self.input_proj(h)  # [B, H]
 
         # optional condition gate
         if self.use_cond_gate:
-            cond = torch.cat([delta, e_m, t_emb], dim=-1)  # [B, 2D + T]
+            cond_parts = []
+            if self.use_delta:
+                cond_parts.append(delta)
+            if self.use_condition:
+                cond_parts.append(e_m)
+            cond = torch.cat(cond_parts + [t_emb], dim=-1)
             gate = self.gate(cond)                          # [B, H]
             h = h * gate
 
