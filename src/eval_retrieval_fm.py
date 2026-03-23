@@ -157,6 +157,9 @@ def build_flow_net(model, args):
             dim=flow_embed_dim,
             time_dim=args.flow_time_dim,
             hidden_dim=args.flow_hidden_dim,
+            use_delta=getattr(args, "global_flow_use_delta", True),
+            use_condition=getattr(args, "global_flow_conditioning", "enabled") == "enabled",
+            use_cond_gate=getattr(args, "global_flow_use_cond_gate", True),
         )
     elif getattr(args, "loss_type", "global") == "sequence":
         if not isinstance(model.visual, VisualTransformer):

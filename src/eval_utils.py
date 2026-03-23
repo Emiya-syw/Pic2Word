@@ -108,6 +108,58 @@ def encode_image_via_img2text(model, img2text, images, args):
     return text_features
 
 
+def _normalize_feature(x, eps=1e-6):
+    return x / x.norm(dim=-1, keepdim=True).clamp(min=eps)
+
+
+def encode_pic2word_composed_feature(model, img2text, images, texts, args):
+    text_tokens = tokenize_to_device(texts, args)
+    split_text = getattr(args, "global_flow_pic2word_marker", "*")
+    split_token_id = tokenize([split_text])[0][1].item()
+
+    if not torch.all((text_tokens == split_token_id).any(dim=1)):
+        raise ValueError(
+            "global_flow_compose_method='pic2word' requires every text prompt to "
+            f"contain the marker token {split_text!r}."
+        )
+
+    image_features = model.encode_image(images)
+    image_features = _normalize_feature(image_features)
+    query_image_tokens = img2text(image_features)
+    composed_feature = model.encode_text_img_retrieval(
+        text_tokens,
+        query_image_tokens,
+        split_ind=split_token_id,
+        repeat=False,
+    )
+    return composed_feature
+
+
+def build_global_flow_feature(model, img2text, ref_images, texts, args, source, text_weight, image_weight):
+    source = source.lower()
+    if source == "text":
+        feature = encode_text_batch(model, texts, args)
+    elif source == "image":
+        feature = encode_image_via_img2text(model, img2text, ref_images, args)
+    elif source == "composed":
+        compose_method = getattr(args, "global_flow_compose_method", "add").lower()
+        if compose_method == "pic2word":
+            feature = encode_pic2word_composed_feature(model, img2text, ref_images, texts, args)
+        else:
+            text_feature = encode_text_batch(model, texts, args)
+            image_feature = encode_image_via_img2text(model, img2text, ref_images, args)
+            feature = text_weight * text_feature + image_weight * image_feature
+            if compose_method == "mean":
+                denom = max(text_weight + image_weight, 1e-6)
+                feature = feature / denom
+            elif compose_method != "add":
+                raise ValueError(f"Unsupported global_flow_compose_method: {compose_method}")
+    else:
+        raise ValueError(f"Unsupported global flow feature source: {source}")
+
+    return _normalize_feature(feature)
+
+
 def build_text_mask(tokens):
     return tokens.ne(0)
 
@@ -225,12 +277,13 @@ def encode_text_from_token_features(
     x = pooled @ model.text_projection
     return x
 
-def flow_matching_inference(flow_net, q, e_m, num_steps=4, eps=1e-6):
+def flow_matching_inference(flow_net, q, e_m=None, num_steps=4, eps=1e-6):
     def l2norm(x):
         return x / x.norm(dim=-1, keepdim=True).clamp(min=eps)
 
     q = l2norm(q)
-    e_m = l2norm(e_m)
+    if e_m is not None:
+        e_m = l2norm(e_m)
 
     x_t = q.clone()
     x0 = q.clone()
@@ -245,7 +298,7 @@ def flow_matching_inference(flow_net, q, e_m, num_steps=4, eps=1e-6):
             dtype=q.dtype,
         )
         delta = x_t - x0
-        v = flow_net(x_t, delta, e_m, t)
+        v = flow_net(x_t, delta=delta, e_m=e_m, t=t)
         v = torch.tanh(v)
         x_t = x_t + dt * v
         x_t = l2norm(x_t)
@@ -1121,12 +1174,33 @@ def evaluate_fashion_fm(model, img2text, args, source_loader, target_loader, flo
                     )
                     flow_feature = flow_feature / flow_feature.norm(dim=-1, keepdim=True).clamp(min=1e-6)
                 else:
-                    # e_m = m.encode_image(ref_images)
-                    e_m = encode_image_via_img2text(m, it, ref_images, args)
-                    q = m.encode_text(caption_only)
+                    q = build_global_flow_feature(
+                        model=m,
+                        img2text=it,
+                        ref_images=ref_images,
+                        texts=caption_only,
+                        args=args,
+                        source=getattr(args, "global_flow_start_source", "text"),
+                        text_weight=getattr(args, "global_flow_start_text_weight", 1.0),
+                        image_weight=getattr(args, "global_flow_start_image_weight", 1.0),
+                    )
+                    use_condition = getattr(args, "global_flow_conditioning", "enabled") == "enabled"
+                    e_m = None
+                    if use_condition:
+                        e_m = build_global_flow_feature(
+                            model=m,
+                            img2text=it,
+                            ref_images=ref_images,
+                            texts=caption_only,
+                            args=args,
+                            source=getattr(args, "global_flow_condition_source", "image"),
+                            text_weight=getattr(args, "global_flow_condition_text_weight", 1.0),
+                            image_weight=getattr(args, "global_flow_condition_image_weight", 1.0),
+                        )
                     q = apply_global_start_noise(q, args)
-                    q = q / q.norm(dim=-1, keepdim=True).clamp(min=1e-6)
-                    e_m = e_m / e_m.norm(dim=-1, keepdim=True).clamp(min=1e-6)
+                    q = _normalize_feature(q)
+                    if e_m is not None:
+                        e_m = _normalize_feature(e_m)
 
                     flow_feature = flow_matching_inference(
                         fm,
