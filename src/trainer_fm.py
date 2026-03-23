@@ -99,6 +99,13 @@ def encode_image_batch(model, images, args):
     return image_features
 
 
+def apply_global_start_noise(features, args):
+    noise_std = getattr(args, "global_start_noise_std", 0.0)
+    if noise_std <= 0:
+        return features
+    return features + torch.randn_like(features) * noise_std
+
+
 def build_text_mask(tokens):
     return tokens.ne(0)
 
@@ -298,6 +305,8 @@ def train(model, img2text, flow_net, criterion, data, epoch, optimizer, scaler, 
                 e_m = encode_image_batch(m, ref_images, args)
                 q = encode_text_batch(m, mod_texts, args)
                 y = encode_text_batch(m, target_texts, args)
+
+                q = apply_global_start_noise(q, args)
 
                 q = q / q.norm(dim=-1, keepdim=True).clamp(min=1e-6)
                 e_m = e_m / e_m.norm(dim=-1, keepdim=True).clamp(min=1e-6)
