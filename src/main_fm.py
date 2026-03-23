@@ -233,6 +233,9 @@ def main_worker(gpu, ngpus_per_node, log_queue, args):
             dim=flow_embed_dim,
             time_dim=args.flow_time_dim,
             hidden_dim=args.flow_hidden_dim,
+            use_delta=args.global_flow_use_delta,
+            use_condition=args.global_flow_conditioning == "enabled",
+            use_cond_gate=args.global_flow_use_cond_gate,
         )
     elif args.loss_type == "sequence":
         if not isinstance(model.visual, VisualTransformer):
