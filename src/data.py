@@ -360,8 +360,9 @@ class FashionIQ_FM(Dataset):
 
         with Image.open(self.target_imgs[idx]) as img:
             target_image = self.transforms(img.convert("RGB"))
+            target_text = self.build_target_text(target_cap)
 
-        return ref_image, target_image, modification_text, target_cap
+        return ref_image, target_image, tokenize(modification_text)[0], tokenize(target_text)[0]
 
 class CC3M_FM(Dataset):
     """
@@ -383,7 +384,7 @@ class CC3M_FM(Dataset):
     }
     """
 
-    def __init__(self, transforms, json_file='/home/sunyw/CIR/Pic2Word/data/MT-CIR/mtcir_target_caption_merged.json', split='train', root='/home/sunyw/CIR/Pic2Word/data/LLaVA-Pretrain'):
+    def __init__(self, transforms, json_file='/home/sunyw/CIR/Pic2Word/data/MT-CIR/mtcir_target_caption_merged_filter.json', split='train', root='/home/sunyw/CIR/Pic2Word/data/LLaVA-Pretrain'):
         self.transforms = transforms
         self.split = split
         self.json_file = json_file
@@ -424,8 +425,8 @@ class CC3M_FM(Dataset):
                     continue
 
                 # 可选：过滤过长文本（instruction 和 target_caption 都检查）
-                inst_len = int((tokenize(instruction)[0] != 0).sum().item())
-                tgt_len = int((tokenize(target_cap)[0] != 0).sum().item())
+                inst_len = int((tokenize(self.build_modification_text(instruction))[0] != 0).sum().item())
+                tgt_len = int((tokenize(self.build_target_text(target_cap))[0] != 0).sum().item())
 
                 if inst_len > 77 or tgt_len > 77:
                     dropped_too_long += 1
@@ -449,11 +450,11 @@ class CC3M_FM(Dataset):
     def __len__(self):
         return len(self.ref_imgs)
 
-    def build_modification_text(self, instruction):
-        return instruction
+    def build_modification_text(self, inst):
+        return f"a photo of * , {inst}"
 
     def build_target_text(self, target_cap):
-        return target_cap
+        return f"a photo of {target_cap}"
 
     def __getitem__(self, idx):
         with Image.open(self.ref_imgs[idx]) as img:

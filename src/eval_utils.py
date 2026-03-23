@@ -1121,7 +1121,8 @@ def evaluate_fashion_fm(model, img2text, args, source_loader, target_loader, flo
                     )
                     flow_feature = flow_feature / flow_feature.norm(dim=-1, keepdim=True).clamp(min=1e-6)
                 else:
-                    e_m = m.encode_image(ref_images)
+                    # e_m = m.encode_image(ref_images)
+                    e_m = encode_image_via_img2text(m, it, ref_images, args)
                     q = m.encode_text(caption_only)
                     q = apply_global_start_noise(q, args)
                     q = q / q.norm(dim=-1, keepdim=True).clamp(min=1e-6)

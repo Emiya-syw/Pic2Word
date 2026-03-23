@@ -35,8 +35,8 @@ import sys
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 from model.clip import _transform, load
 from model.model import convert_weights, CLIP, IM2TEXT
-from eval_utils import evaluate_imgnet_retrieval, evaluate_coco, evaluate_fashion, evaluate_cirr, evaluate_cirr_test
-from data import CsvDataset, CustomFolder, ImageList, CsvCOCO, FashionIQ, CIRR
+from eval_utils import evaluate_imgnet_retrieval, evaluate_coco, evaluate_fashion, evaluate_cirr, evaluate_cirr_test, evaluate_fashion_caption
+from data import CsvDataset, CustomFolder, ImageList, CsvCOCO, FashionIQ, CIRR, FashionIQ_FM
 from params import parse_args, get_project_root
 from logger import setup_primary_logging, setup_worker_logging
 from utils import is_master, convert_models_to_fp32, TargetPad
@@ -277,6 +277,33 @@ def main_worker(gpu, ngpus_per_node, log_queue, args):
             pin_memory=True,
             drop_last=False)
         eval_func(model, img2text, args, prompt, source_dataloader, target_dataloader)
+    elif args.eval_mode == 'fashion_caption':
+        assert args.source_data in ['dress', 'shirt', 'toptee']
+        source_dataset = FashionIQ_FM(cloth=args.source_data, 
+                                   transforms=preprocess_val, 
+                                   root=root_project, 
+                                   split="val")
+        target_dataset = FashionIQ(
+            cloth=args.source_data,
+            transforms=preprocess_val,
+            root=root_project,
+            mode='imgs'
+        )
+        source_dataloader = DataLoader(
+            source_dataset,
+            batch_size=args.batch_size,
+            shuffle=False,
+            num_workers=args.workers,
+            pin_memory=True,
+            drop_last=False)
+        target_dataloader = DataLoader(
+            target_dataset,
+            batch_size=args.batch_size,
+            shuffle=False,
+            num_workers=args.workers,
+            pin_memory=True,
+            drop_last=False)
+        evaluate_fashion_caption(model, img2text, args, source_dataloader, target_dataloader)
 
 def main():
     args = parse_args()

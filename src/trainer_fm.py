@@ -291,7 +291,7 @@ def train(model, img2text, flow_net, criterion, data, epoch, optimizer, scaler, 
         data_time = time.time() - end
 
         m = unwrap_model(model)
-        t = unwrap_model(img2text)
+        it = unwrap_model(img2text)
 
         # --------------------------------------------------
         # 2. encode features
@@ -302,7 +302,7 @@ def train(model, img2text, flow_net, criterion, data, epoch, optimizer, scaler, 
         # --------------------------------------------------
         with torch.no_grad():
             if args.loss_type == "global":
-                e_m = encode_image_batch(m, ref_images, args)
+                e_m = encode_image_via_img2text(m, it, ref_images, args)
                 q = encode_text_batch(m, mod_texts, args)
                 y = encode_text_batch(m, target_texts, args)
 
