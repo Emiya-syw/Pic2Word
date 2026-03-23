@@ -76,6 +76,13 @@ def encode_text_batch(model, texts, args):
     return text_features
 
 
+def apply_global_start_noise(features, args):
+    noise_std = getattr(args, "global_start_noise_std", 0.0)
+    if noise_std <= 0:
+        return features
+    return features + torch.randn_like(features) * noise_std
+
+
 def get_text_features(model, token_features, args):
     """
     image-derived token features -> CLIP text encoder
@@ -1116,6 +1123,7 @@ def evaluate_fashion_fm(model, img2text, args, source_loader, target_loader, flo
                 else:
                     e_m = m.encode_image(ref_images)
                     q = m.encode_text(caption_only)
+                    q = apply_global_start_noise(q, args)
                     q = q / q.norm(dim=-1, keepdim=True).clamp(min=1e-6)
                     e_m = e_m / e_m.norm(dim=-1, keepdim=True).clamp(min=1e-6)
 

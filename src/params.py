@@ -332,6 +332,12 @@ def parse_args():
         default=0.07,
         help="Temperature used by the global retrieval loss.",
     )
+    parser.add_argument(
+        "--global-start-noise-std",
+        type=float,
+        default=0.0,
+        help="Gaussian noise std added to the global-loss start embedding (modification text) before normalization.",
+    )
     parser.add_argument("--lambda-fm", type=float, default=1.0, help="Weight of the flow matching loss.")
     parser.add_argument("--lambda-end", type=float, default=1.0, help="Weight of the endpoint reconstruction loss.")
     parser.add_argument("--lambda-ret", type=float, default=0.05, help="Weight of the global retrieval loss.")
