@@ -590,6 +590,8 @@ def main():
         args.lambda_ret = 0.05
     if not hasattr(args, "lambda_mid"):
         args.lambda_mid = 0.5
+    if not hasattr(args, "global_start_noise_std"):
+        args.global_start_noise_std = 0.0
     if not hasattr(args, "loss_type"):
         args.loss_type = "global"
 
@@ -601,7 +603,8 @@ def main():
             f"bs={args.batch_size}_"
             f"flow={args.loss_type}_"
             f"flowhd={args.flow_hidden_dim}_"
-            f"steps={args.flow_num_steps}"
+            f"steps={args.flow_num_steps}_"
+            f"gnoise={args.global_start_noise_std}"
         )
         if args.time_suffix:
             args.name += "_date=%Y-%m-%d-%H-%M-%S"
