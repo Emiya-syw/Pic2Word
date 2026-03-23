@@ -94,7 +94,8 @@ class ConditionalFlowNet(nn.Module):
             for _ in range(num_blocks)
         ])
 
-        if use_cond_gate:
+        self.gate = None
+        if self.use_cond_gate:
             gate_inputs = int(self.use_delta) + int(self.use_condition)
             self.gate = nn.Sequential(
                 nn.LayerNorm(dim * gate_inputs + time_dim),
