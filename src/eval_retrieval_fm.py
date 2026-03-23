@@ -496,6 +496,8 @@ def main():
         args.flow_hidden_dim = 4096
     if not hasattr(args, "flow_time_dim"):
         args.flow_time_dim = 128
+    if not hasattr(args, "global_start_noise_std"):
+        args.global_start_noise_std = 0.0
 
     args.distributed = (args.gpu is None) and torch.cuda.is_available() and (not args.dp)
 
