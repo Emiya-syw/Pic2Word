@@ -156,19 +156,29 @@ def extract_image_token_features(model, images, end_layer=-1):
     raise AttributeError("Current CLIP visual encoder does not expose intermediate visual tokens.")
 
 
-def encode_text_from_token_features(model, text, token_features, start_layer=-1):
-    if hasattr(model, "encode_text_from_tokens"):
-        return model.encode_text_from_tokens(text, token_features, start_layer=start_layer)
-
+def encode_text_from_token_features(model, text, token_features, start_layer=-1, pooling="eot"):
     x = token_features.type(model.dtype)
     x = x.permute(1, 0, 2)
     x = _transformer_forward_from(model.transformer, x, start_layer=start_layer)
     x = x.permute(1, 0, 2)
     x = model.ln_final(x).type(model.dtype)
 
-    end_id = getattr(model, "end_id", model.vocab_size - 1)
-    collect_ind = (text == end_id).nonzero()[:, 1]
-    x = x[torch.arange(x.size(0), device=x.device), collect_ind] @ model.text_projection
+    if pooling == "eot":
+        end_id = getattr(model, "end_id", model.vocab_size - 1)
+        collect_ind = (text == end_id).nonzero()[:, 1]
+        pooled = x[torch.arange(x.size(0), device=x.device), collect_ind]
+    elif pooling == "last_valid":
+        valid_mask = text.ne(0)
+        collect_ind = valid_mask.long().sum(dim=1).sub(1).clamp_min(0)
+        pooled = x[torch.arange(x.size(0), device=x.device), collect_ind]
+    elif pooling == "mean":
+        valid_mask = text.ne(0).unsqueeze(-1)
+        denom = valid_mask.sum(dim=1).clamp_min(1)
+        pooled = (x * valid_mask).sum(dim=1) / denom
+    else:
+        raise ValueError(f"Unsupported text pooling mode: {pooling}")
+
+    x = pooled @ model.text_projection
     return x
 
 def flow_matching_inference(flow_net, q, e_m, num_steps=4, eps=1e-6):
@@ -1061,6 +1071,7 @@ def evaluate_fashion_fm(model, img2text, args, source_loader, target_loader, flo
                         caption_only,
                         flow_tokens,
                         start_layer=-1,
+                        pooling=getattr(args, "seq_flow_pooling", "eot"),
                     )
                     flow_feature = flow_feature / flow_feature.norm(dim=-1, keepdim=True).clamp(min=1e-6)
                 else:
