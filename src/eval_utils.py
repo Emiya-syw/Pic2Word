@@ -156,19 +156,66 @@ def extract_image_token_features(model, images, end_layer=-1):
     raise AttributeError("Current CLIP visual encoder does not expose intermediate visual tokens.")
 
 
-def encode_text_from_token_features(model, text, token_features, start_layer=-1):
-    if hasattr(model, "encode_text_from_tokens"):
-        return model.encode_text_from_tokens(text, token_features, start_layer=start_layer)
-
+def encode_text_from_token_features(
+    model,
+    text,
+    token_features,
+    start_layer=-1,
+    pooling="eot",
+    ref_token_features=None,
+    pooling_k=3,
+):
     x = token_features.type(model.dtype)
     x = x.permute(1, 0, 2)
     x = _transformer_forward_from(model.transformer, x, start_layer=start_layer)
     x = x.permute(1, 0, 2)
     x = model.ln_final(x).type(model.dtype)
 
-    end_id = getattr(model, "end_id", model.vocab_size - 1)
-    collect_ind = (text == end_id).nonzero()[:, 1]
-    x = x[torch.arange(x.size(0), device=x.device), collect_ind] @ model.text_projection
+    valid_mask = text.ne(0)
+
+    if pooling == "eot":
+        end_id = getattr(model, "end_id", model.vocab_size - 1)
+        collect_ind = (text == end_id).nonzero()[:, 1]
+        pooled = x[torch.arange(x.size(0), device=x.device), collect_ind]
+    elif pooling == "last_valid":
+        collect_ind = valid_mask.long().sum(dim=1).sub(1).clamp_min(0)
+        pooled = x[torch.arange(x.size(0), device=x.device), collect_ind]
+    elif pooling == "mean":
+        mean_mask = valid_mask.unsqueeze(-1)
+        denom = mean_mask.sum(dim=1).clamp_min(1)
+        pooled = (x * mean_mask).sum(dim=1) / denom
+    elif pooling == "tailk_mean":
+        tail_scores = valid_mask.float()
+        tail_scores = tail_scores + torch.arange(
+            text.size(1),
+            device=text.device,
+            dtype=x.dtype,
+        ).unsqueeze(0) / max(text.size(1), 1)
+        topk = min(max(int(pooling_k), 1), text.size(1))
+        tail_idx = tail_scores.topk(topk, dim=1).indices
+        tail_hidden = x.gather(1, tail_idx.unsqueeze(-1).expand(-1, -1, x.size(-1)))
+        tail_mask = valid_mask.gather(1, tail_idx).unsqueeze(-1).type_as(tail_hidden)
+        pooled = (tail_hidden * tail_mask).sum(dim=1) / tail_mask.sum(dim=1).clamp_min(1.0)
+    elif pooling == "topk_changed":
+        if ref_token_features is None:
+            raise ValueError("topk_changed pooling requires ref_token_features.")
+        ref_x = ref_token_features.type(model.dtype)
+        ref_x = ref_x.permute(1, 0, 2)
+        ref_x = _transformer_forward_from(model.transformer, ref_x, start_layer=start_layer)
+        ref_x = ref_x.permute(1, 0, 2)
+        ref_x = model.ln_final(ref_x).type(model.dtype)
+
+        change = 1.0 - F.cosine_similarity(x, ref_x, dim=-1)
+        change = change.masked_fill(~valid_mask, float("-inf"))
+        topk = min(max(int(pooling_k), 1), text.size(1))
+        changed_idx = change.topk(topk, dim=1).indices
+        changed_hidden = x.gather(1, changed_idx.unsqueeze(-1).expand(-1, -1, x.size(-1)))
+        changed_mask = valid_mask.gather(1, changed_idx).unsqueeze(-1).type_as(changed_hidden)
+        pooled = (changed_hidden * changed_mask).sum(dim=1) / changed_mask.sum(dim=1).clamp_min(1.0)
+    else:
+        raise ValueError(f"Unsupported text pooling mode: {pooling}")
+
+    x = pooled @ model.text_projection
     return x
 
 def flow_matching_inference(flow_net, q, e_m, num_steps=4, eps=1e-6):
@@ -1061,6 +1108,9 @@ def evaluate_fashion_fm(model, img2text, args, source_loader, target_loader, flo
                         caption_only,
                         flow_tokens,
                         start_layer=-1,
+                        pooling=getattr(args, "seq_flow_pooling", "eot"),
+                        ref_token_features=src_tokens,
+                        pooling_k=getattr(args, "seq_flow_pooling_k", 3),
                     )
                     flow_feature = flow_feature / flow_feature.norm(dim=-1, keepdim=True).clamp(min=1e-6)
                 else:
