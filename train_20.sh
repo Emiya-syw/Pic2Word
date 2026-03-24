@@ -1,50 +1,75 @@
-#!/bin/bash
-set -e
+#!/usr/bin/env bash
+set -euo pipefail
 
-exp_name="fm_t_v_mtcir_500k_film_v3"
-gpu_id=0
-train_gpus="0,1,2,3,4,5,6,7"
+# ==========================================================
+# 20-epoch Flow Matching training on CC3M_FM
+# - Train dataset: CC3M_FM (dataset-type=cc3m)
+# - In-training validation: every 10 epochs (implemented in main_fm.py)
+# ==========================================================
 
-log_root="/home/sunyw/CIR/Pic2Word/logs/${exp_name}"
-ckpt_dir="${log_root}/checkpoints"
+EXP_NAME="fm_cc3m_20ep"
+MODEL_NAME="RN50"
+BATCH_SIZE=64
+WORKERS=8
 
-init_ckpt="/home/sunyw/CIR/Pic2Word/weights/pic2word_model.pt"
+# ---------------- Flow matching params (global) ----------------
+LOSS_TYPE="global"
+FLOW_HIDDEN_DIM=4096
+FLOW_TIME_DIM=128
+FLOW_NUM_STEPS=4
+FLOW_TEMPERATURE=0.07
 
-loss_type="global"
+LAMBDA_FM=1.0
+LAMBDA_END=1.0
+LAMBDA_RET=0.05
+LAMBDA_MID=0.5
 
-# -----------------------------
-# Global flow config
-# 你要的新版默认走：
-#   1) 不使用额外 condition
-#   2) 起点直接用 image+text 的 composed feature
-#   3) composed feature 优先走 pic2word 方式
-# 如果训练文本里没有 "*" 占位符，请把 compose_method 改成 add 或 mean。
-# -----------------------------
-flow_conditioning="disabled"
-flow_start_source="composed"
-flow_condition_source="image"
-flow_compose_method="pic2word"
-flow_pic2word_marker="*"
-flow_start_text_weight="1.0"
-flow_start_image_weight="1.0"
-flow_condition_text_weight="1.0"
-flow_condition_image_weight="1.0"
-global_start_noise_std="0.0"
-disable_delta=0
-disable_cond_gate=0
+GLOBAL_FLOW_CONDITIONING="enabled"
+GLOBAL_FLOW_START_SOURCE="text"
+GLOBAL_FLOW_CONDITION_SOURCE="image"
+GLOBAL_FLOW_COMPOSE_METHOD="add"
+GLOBAL_FLOW_START_TEXT_WEIGHT=1.0
+GLOBAL_FLOW_START_IMAGE_WEIGHT=1.0
+GLOBAL_FLOW_CONDITION_TEXT_WEIGHT=1.0
+GLOBAL_FLOW_CONDITION_IMAGE_WEIGHT=1.0
+GLOBAL_FLOW_MARKER="*"
+GLOBAL_START_NOISE_STD=0.0
 
-extra_flow_args=(
-    --global-flow-conditioning "${flow_conditioning}"
-    --global-flow-start-source "${flow_start_source}"
-    --global-flow-condition-source "${flow_condition_source}"
-    --global-flow-compose-method "${flow_compose_method}"
-    --global-flow-pic2word-marker "${flow_pic2word_marker}"
-    --global-flow-start-text-weight "${flow_start_text_weight}"
-    --global-flow-start-image-weight "${flow_start_image_weight}"
-    --global-flow-condition-text-weight "${flow_condition_text_weight}"
-    --global-flow-condition-image-weight "${flow_condition_image_weight}"
-    --global-start-noise-std "${global_start_noise_std}"
-)
+python src/main_fm.py \
+  --name "${EXP_NAME}" \
+  --model "${MODEL_NAME}" \
+  --epochs 20 \
+  --batch-size "${BATCH_SIZE}" \
+  --workers "${WORKERS}" \
+  --dataset-type cc3m \
+  --dataset-type-val cc3m \
+  --train-data cc3m_placeholder \
+  --lr 5e-5 \
+  --wd 0.2 \
+  --warmup 1000 \
+  --precision amp \
+  --loss-type "${LOSS_TYPE}" \
+  --flow-hidden-dim "${FLOW_HIDDEN_DIM}" \
+  --flow-time-dim "${FLOW_TIME_DIM}" \
+  --flow-num-steps "${FLOW_NUM_STEPS}" \
+  --flow-temperature "${FLOW_TEMPERATURE}" \
+  --lambda-fm "${LAMBDA_FM}" \
+  --lambda-end "${LAMBDA_END}" \
+  --lambda-ret "${LAMBDA_RET}" \
+  --lambda-mid "${LAMBDA_MID}" \
+  --global-flow-conditioning "${GLOBAL_FLOW_CONDITIONING}" \
+  --global-flow-start-source "${GLOBAL_FLOW_START_SOURCE}" \
+  --global-flow-condition-source "${GLOBAL_FLOW_CONDITION_SOURCE}" \
+  --global-flow-compose-method "${GLOBAL_FLOW_COMPOSE_METHOD}" \
+  --global-flow-start-text-weight "${GLOBAL_FLOW_START_TEXT_WEIGHT}" \
+  --global-flow-start-image-weight "${GLOBAL_FLOW_START_IMAGE_WEIGHT}" \
+  --global-flow-condition-text-weight "${GLOBAL_FLOW_CONDITION_TEXT_WEIGHT}" \
+  --global-flow-condition-image-weight "${GLOBAL_FLOW_CONDITION_IMAGE_WEIGHT}" \
+  --global-flow-pic2word-marker "${GLOBAL_FLOW_MARKER}" \
+  --global-start-noise-std "${GLOBAL_START_NOISE_STD}" \
+  --save-frequency 10 \
+  --save-most-recent \
+  --report-to tensorboard
 
 if [ "${disable_delta}" -eq 1 ]; then
     extra_flow_args+=(--global-flow-disable-delta)
