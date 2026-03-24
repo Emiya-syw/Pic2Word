@@ -39,7 +39,7 @@ sys.path.insert(0, "/home/sunyw/CIR/Pic2Word")
 from third_party.open_clip.scheduler import cosine_lr
 from model.clip import _transform, load
 from model.model import convert_weights, CLIP, IM2TEXT, VisualTransformer
-from trainer_fm import train
+from trainer_fm import train, validate
 from data import get_data
 from params import parse_args
 from logger import setup_primary_logging, setup_worker_logging
@@ -537,6 +537,23 @@ def main_worker(gpu, ngpus_per_node, log_queue, args):
             args=args,
             writer=writer,
         )
+
+        if (epoch + 1) % 10 == 0:
+            validate(
+                model=model,
+                img2text=img2text,
+                flow_net=flow_net,
+                criterion=criterion,
+                data=data,
+                epoch=epoch + 1,
+                args=args,
+                writer=writer,
+            )
+
+            # restore training mode after validation
+            unwrap_model(model).eval()
+            unwrap_model(img2text).eval()
+            unwrap_model(flow_net).train()
 
         if args.save_logs and (args.gpu == 0 or (not args.distributed)):
             ckpt = save_checkpoint(

@@ -974,12 +974,25 @@ def get_data(args, preprocess_fns):
     preprocess_train, preprocess_val = preprocess_fns
     data = {}
     dataset_type_val = getattr(args, 'dataset_type_val', args.dataset_type)
+    if dataset_type_val == "auto" and args.dataset_type in [
+        "flow_matching", "mtcir", "cc3m", "fashion-iq", "cirr", "imgnet_r", "directory"
+    ]:
+        dataset_type_val = args.dataset_type
+
     if args.train_data:
         data["train"] = get_dataset_fn(args.train_data, args.dataset_type)(
                 args, preprocess_train, is_train=True)
-    if args.val_data:
-        data["val"] = get_dataset_fn(args.val_data, dataset_type_val)(
-            args, preprocess_val, is_train=False)
+
+    # Some dataset types have built-in train/val split logic and do not rely on
+    # external val_data file paths. In that case, allow val loader creation even
+    # when args.val_data is not explicitly provided.
+    auto_val_dataset_types = {"flow_matching", "mtcir", "cc3m"}
+    should_build_val = bool(args.val_data) or (args.dataset_type in auto_val_dataset_types)
+    val_input = args.val_data if args.val_data else args.train_data
+    if should_build_val and val_input:
+        data["val"] = get_dataset_fn(val_input, dataset_type_val)(
+            args, preprocess_val, is_train=False, input_filename=val_input)
+
     if args.imagenet_val is not None:
         data["imagenet-val"] = get_imagenet(args, preprocess_fns, "val")
     if args.imagenet_v2 is not None:
