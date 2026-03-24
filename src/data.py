@@ -911,7 +911,7 @@ def get_fashion_iq(args, preprocess_fn, is_train, input_filename=None):
             pin_memory=True,
             drop_last=False,
         )
-        dataloader.target_dataloader = target_dataloader
+        return DataInfo((dataloader, target_dataloader), sampler)
 
     return DataInfo(dataloader, sampler)
 

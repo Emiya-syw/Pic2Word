@@ -333,6 +333,11 @@ def validate(model, img2text, flow_net, criterion, data, epoch, args, writer=Non
     val_loader = data["val"].dataloader
     if val_loader is None:
         return None
+    if isinstance(val_loader, (list, tuple)) and len(val_loader) == 2:
+        source_loader, target_loader = val_loader[0], val_loader[1]
+    else:
+        source_loader = val_loader
+        target_loader = getattr(source_loader, "target_dataloader", None)
 
     m = unwrap_model(model)
     it = unwrap_model(img2text)
@@ -350,7 +355,6 @@ def validate(model, img2text, flow_net, criterion, data, epoch, args, writer=Non
     gallery_features = None
     gallery_names = None
 
-    target_loader = getattr(val_loader, "target_dataloader", None)
     if target_loader is not None:
         gallery_features_list = []
         gallery_names_list = []
@@ -366,7 +370,7 @@ def validate(model, img2text, flow_net, criterion, data, epoch, args, writer=Non
             gallery_names = gallery_names_list
 
     with torch.no_grad():
-        for batch in val_loader:
+        for batch in source_loader:
             if isinstance(batch, (list, tuple)) and len(batch) >= 5:
                 all_answer_names.extend(list(batch[4]))
             ref_images, target_images, mod_texts, target_texts = parse_val_batch_for_flow(batch)
