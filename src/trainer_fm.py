@@ -440,27 +440,7 @@ def validate(model, img2text, flow_net, criterion, data, epoch, args, writer=Non
                     num_steps=getattr(args, "flow_num_steps", 16),
                 )
             elif args.loss_type == "sequence":
-                if target_texts is None:
-                    raise ValueError("Sequence validation requires target_texts, but got None.")
-
-                # For validation retrieval metrics, follow eval-style composed
-                # query / target text feature extraction.
-                val_query_features = build_global_flow_feature(
-                    model=m,
-                    img2text=it,
-                    ref_images=ref_images,
-                    texts=mod_texts,
-                    args=args,
-                    source=getattr(args, "global_flow_start_source", "text"),
-                    text_weight=getattr(args, "global_flow_start_text_weight", 1.0),
-                    image_weight=getattr(args, "global_flow_start_image_weight", 1.0),
-                )
-                if target_images is not None:
-                    val_target_features = encode_image_batch(m, target_images, args)
-                else:
-                    val_target_features = encode_text_batch(m, target_texts, args)
-                val_query_features = _normalize_feature(val_query_features)
-                val_target_features = _normalize_feature(val_target_features)
+                pass
             else:
                 raise ValueError(f"Unsupported loss_type: {args.loss_type}")
 
@@ -480,7 +460,7 @@ def validate(model, img2text, flow_net, criterion, data, epoch, args, writer=Non
         gt_index = torch.tensor([name_to_index[name] for name in all_answer_names], dtype=torch.long)
         gt_pos = torch.where(ranking == gt_index.view(-1, 1))[1]
 
-        for k in [1, 5, 10]:
+        for k in [5, 10, 50]:
             k_eff = min(k, ranking.size(1))
             val_metrics[f"R@{k}"] = (gt_pos < k_eff).float().mean().item() * 100.0
     elif len(all_query_features) > 0 and len(all_target_features) > 0:
@@ -491,7 +471,7 @@ def validate(model, img2text, flow_net, criterion, data, epoch, args, writer=Non
         gt = torch.arange(ranking.size(0)).view(-1, 1)
         gt_pos = torch.where(ranking == gt)[1]
 
-        for k in [1, 5, 10]:
+        for k in [5, 10, 50]:
             k_eff = min(k, ranking.size(1))
             val_metrics[f"R@{k}"] = (gt_pos < k_eff).float().mean().item() * 100.0
 

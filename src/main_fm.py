@@ -538,7 +538,7 @@ def main_worker(gpu, ngpus_per_node, log_queue, args):
             writer=writer,
         )
 
-        if (epoch + 1) % 10 == 0:
+        if (epoch + 1) % 1 == 0:
             validate(
                 model=model,
                 img2text=img2text,
