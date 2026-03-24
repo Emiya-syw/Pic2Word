@@ -874,11 +874,12 @@ def get_fashion_iq(args, preprocess_fn, is_train, input_filename=None):
             "Expected one of ['dress', 'shirt', 'toptee']."
         )
 
-    dataset = FashionIQ_FM(
+    dataset = FashionIQ(
         cloth=cloth,
         transforms=preprocess_fn,
-        split='train' if is_train else 'val',
-        root="./data"
+        root="./data",
+        mode='caps',
+        is_return_target_path=not is_train,
     )
     num_samples = len(dataset)
     sampler = DistributedSampler(dataset) if args.distributed and is_train else None
@@ -895,6 +896,22 @@ def get_fashion_iq(args, preprocess_fn, is_train, input_filename=None):
     )
     dataloader.num_samples = num_samples
     dataloader.num_batches = len(dataloader)
+    if not is_train:
+        target_dataset = FashionIQ(
+            cloth=cloth,
+            transforms=preprocess_fn,
+            root="./data",
+            mode='imgs',
+        )
+        target_dataloader = DataLoader(
+            target_dataset,
+            batch_size=args.batch_size,
+            shuffle=False,
+            num_workers=args.workers,
+            pin_memory=True,
+            drop_last=False,
+        )
+        dataloader.target_dataloader = target_dataloader
 
     return DataInfo(dataloader, sampler)
 

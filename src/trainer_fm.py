@@ -307,15 +307,21 @@ def parse_val_batch_for_flow(batch):
       1) (ref_images, mod_texts, target_texts)
       2) (ref_images, target_images, mod_texts, target_texts)
       3) dict with keys ref_images/mod_texts/target_texts
+
+    Returns:
+        ref_images, target_images(or None), mod_texts, target_texts
     """
     if isinstance(batch, dict):
-        return batch["ref_images"], batch["mod_texts"], batch["target_texts"]
+        return batch["ref_images"], batch.get("target_images", None), batch["mod_texts"], batch["target_texts"]
 
     if isinstance(batch, (list, tuple)):
         if len(batch) == 3:
-            return batch[0], batch[1], batch[2]
+            # FashionIQ(caps) returns (ref_images, target_images, modification_text)
+            if torch.is_tensor(batch[1]):
+                return batch[0], batch[1], batch[2], None
+            return batch[0], None, batch[1], batch[2]
         if len(batch) >= 4:
-            return batch[0], batch[2], batch[3]
+            return batch[0], batch[1], batch[2], batch[3]
 
     raise TypeError(f"Unsupported validation batch type: {type(batch)}")
 
@@ -340,11 +346,33 @@ def validate(model, img2text, flow_net, criterion, data, epoch, args, writer=Non
     total_size = 0
     all_query_features = []
     all_target_features = []
+    all_answer_names = []
+    gallery_features = None
+    gallery_names = None
+
+    target_loader = getattr(val_loader, "target_dataloader", None)
+    if target_loader is not None:
+        gallery_features_list = []
+        gallery_names_list = []
+        with torch.no_grad():
+            for target_batch in target_loader:
+                gallery_images, gallery_paths = target_batch
+                gallery_images = move_to_device(gallery_images, args.gpu)
+                feats = _normalize_feature(encode_image_batch(m, gallery_images, args))
+                gallery_features_list.append(feats.detach().cpu())
+                gallery_names_list.extend(list(gallery_paths))
+        if len(gallery_features_list) > 0:
+            gallery_features = F.normalize(torch.cat(gallery_features_list, dim=0), dim=-1)
+            gallery_names = gallery_names_list
 
     with torch.no_grad():
         for batch in val_loader:
-            ref_images, mod_texts, target_texts = parse_val_batch_for_flow(batch)
+            if isinstance(batch, (list, tuple)) and len(batch) >= 5:
+                all_answer_names.extend(list(batch[4]))
+            ref_images, target_images, mod_texts, target_texts = parse_val_batch_for_flow(batch)
             ref_images = move_to_device(ref_images, args.gpu)
+            if target_images is not None:
+                target_images = move_to_device(target_images, args.gpu)
 
             if args.loss_type == "global":
                 q = build_global_flow_feature(
@@ -370,7 +398,12 @@ def validate(model, img2text, flow_net, criterion, data, epoch, args, writer=Non
                         text_weight=getattr(args, "global_flow_condition_text_weight", 1.0),
                         image_weight=getattr(args, "global_flow_condition_image_weight", 1.0),
                     )
-                y = encode_text_batch(m, target_texts, args)
+                if target_texts is not None:
+                    y = encode_text_batch(m, target_texts, args)
+                elif target_images is not None:
+                    y = encode_image_batch(m, target_images, args)
+                else:
+                    raise ValueError("Validation batch must provide target_texts or target_images.")
 
                 q = _normalize_feature(apply_global_start_noise(q, args))
                 y = _normalize_feature(y)
@@ -380,8 +413,13 @@ def validate(model, img2text, flow_net, criterion, data, epoch, args, writer=Non
                 loss_output = criterion(q, y, e_m)
                 batch_loss = loss_output["loss"]
                 val_query_features = q
-                val_target_features = y
+                if target_images is not None:
+                    val_target_features = _normalize_feature(encode_image_batch(m, target_images, args))
+                else:
+                    val_target_features = y
             elif args.loss_type == "sequence":
+                if target_texts is None:
+                    raise ValueError("Sequence validation requires target_texts, but got None.")
                 seq_inputs = build_token_level_inputs(
                     model=m,
                     ref_images=ref_images,
@@ -425,7 +463,10 @@ def validate(model, img2text, flow_net, criterion, data, epoch, args, writer=Non
                     text_weight=getattr(args, "global_flow_start_text_weight", 1.0),
                     image_weight=getattr(args, "global_flow_start_image_weight", 1.0),
                 )
-                val_target_features = encode_text_batch(m, target_texts, args)
+                if target_images is not None:
+                    val_target_features = encode_image_batch(m, target_images, args)
+                else:
+                    val_target_features = encode_text_batch(m, target_texts, args)
                 val_query_features = _normalize_feature(val_query_features)
                 val_target_features = _normalize_feature(val_target_features)
             else:
@@ -442,7 +483,19 @@ def validate(model, img2text, flow_net, criterion, data, epoch, args, writer=Non
 
     mean_val_loss = total_loss_sum / total_size
     val_metrics = {}
-    if len(all_query_features) > 0 and len(all_target_features) > 0:
+    if gallery_features is not None and len(all_query_features) > 0 and len(all_answer_names) > 0:
+        query_features = F.normalize(torch.cat(all_query_features, dim=0), dim=-1)
+        logits = query_features @ gallery_features.t()
+        ranking = torch.argsort(logits, dim=-1, descending=True)
+
+        name_to_index = {name: idx for idx, name in enumerate(gallery_names)}
+        gt_index = torch.tensor([name_to_index[name] for name in all_answer_names], dtype=torch.long)
+        gt_pos = torch.where(ranking == gt_index.view(-1, 1))[1]
+
+        for k in [1, 5, 10]:
+            k_eff = min(k, ranking.size(1))
+            val_metrics[f"R@{k}"] = (gt_pos < k_eff).float().mean().item() * 100.0
+    elif len(all_query_features) > 0 and len(all_target_features) > 0:
         query_features = F.normalize(torch.cat(all_query_features, dim=0), dim=-1)
         target_features = F.normalize(torch.cat(all_target_features, dim=0), dim=-1)
         logits = query_features @ target_features.t()
