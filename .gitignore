@@ -65,4 +65,3 @@ tmp/
 /weights
 /data
 /logs
-*.sh
