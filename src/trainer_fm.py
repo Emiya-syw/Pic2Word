@@ -338,6 +338,8 @@ def validate(model, img2text, flow_net, criterion, data, epoch, args, writer=Non
 
     total_loss_sum = 0.0
     total_size = 0
+    all_query_features = []
+    all_target_features = []
 
     with torch.no_grad():
         for batch in val_loader:
@@ -377,6 +379,8 @@ def validate(model, img2text, flow_net, criterion, data, epoch, args, writer=Non
 
                 loss_output = criterion(q, y, e_m)
                 batch_loss = loss_output["loss"]
+                val_query_features = q
+                val_target_features = y
             elif args.loss_type == "sequence":
                 seq_inputs = build_token_level_inputs(
                     model=m,
@@ -408,24 +412,63 @@ def validate(model, img2text, flow_net, criterion, data, epoch, args, writer=Non
                     pred_x1_direct=flow_output.pred_x1,
                 )
                 batch_loss = loss_output.loss
+
+                # For validation retrieval metrics, follow eval-style composed
+                # query / target text feature extraction.
+                val_query_features = build_global_flow_feature(
+                    model=m,
+                    img2text=it,
+                    ref_images=ref_images,
+                    texts=mod_texts,
+                    args=args,
+                    source=getattr(args, "global_flow_start_source", "text"),
+                    text_weight=getattr(args, "global_flow_start_text_weight", 1.0),
+                    image_weight=getattr(args, "global_flow_start_image_weight", 1.0),
+                )
+                val_target_features = encode_text_batch(m, target_texts, args)
+                val_query_features = _normalize_feature(val_query_features)
+                val_target_features = _normalize_feature(val_target_features)
             else:
                 raise ValueError(f"Unsupported loss_type: {args.loss_type}")
 
             batch_size = ref_images.size(0)
             total_loss_sum += batch_loss.item() * batch_size
             total_size += batch_size
+            all_query_features.append(val_query_features.detach().cpu())
+            all_target_features.append(val_target_features.detach().cpu())
 
     if total_size == 0:
         return None
 
     mean_val_loss = total_loss_sum / total_size
+    val_metrics = {}
+    if len(all_query_features) > 0 and len(all_target_features) > 0:
+        query_features = F.normalize(torch.cat(all_query_features, dim=0), dim=-1)
+        target_features = F.normalize(torch.cat(all_target_features, dim=0), dim=-1)
+        logits = query_features @ target_features.t()
+        ranking = torch.argsort(logits, dim=-1, descending=True)
+        gt = torch.arange(ranking.size(0)).view(-1, 1)
+        gt_pos = torch.where(ranking == gt)[1]
+
+        for k in [1, 5, 10]:
+            k_eff = min(k, ranking.size(1))
+            val_metrics[f"R@{k}"] = (gt_pos < k_eff).float().mean().item() * 100.0
 
     if is_master(args):
-        logging.info(f"Validation Epoch: {epoch}\tLoss: {mean_val_loss:.6f}")
+        metric_text = "\t".join([f"{k}: {v:.4f}" for k, v in val_metrics.items()])
+        if metric_text:
+            logging.info(f"Validation Epoch: {epoch}\tLoss: {mean_val_loss:.6f}\t{metric_text}")
+        else:
+            logging.info(f"Validation Epoch: {epoch}\tLoss: {mean_val_loss:.6f}")
         if writer is not None:
             writer.add_scalar("val/loss", mean_val_loss, epoch)
+            for key, value in val_metrics.items():
+                writer.add_scalar(f"val/{key}", value, epoch)
         if args.wandb:
-            wandb.log({"val/loss": mean_val_loss, "epoch": epoch})
+            wandb_payload = {"val/loss": mean_val_loss, "epoch": epoch}
+            for key, value in val_metrics.items():
+                wandb_payload[f"val/{key}"] = value
+            wandb.log(wandb_payload)
 
     return mean_val_loss
 
