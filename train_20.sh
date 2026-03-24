@@ -54,6 +54,12 @@ if [ "${disable_cond_gate}" -eq 1 ]; then
     extra_flow_args+=(--global-flow-disable-cond-gate)
 fi
 
+# 仅新增：validation dataset 设置（配合 main_fm.py 每10 epoch自动跑 val loss）
+train_data_path="composed_image_retrieval/train.sh"
+val_data_path="composed_image_retrieval/val.sh"
+train_dataset_type="cc3m"
+val_dataset_type="cc3m"
+
 # 每次把总 epoch 设为 20,40,60,80,100
 for target_epoch in 1
 do
@@ -70,11 +76,15 @@ do
     echo "Flow conditioning: ${flow_conditioning}"
     echo "Flow start source: ${flow_start_source}"
     echo "Flow compose method: ${flow_compose_method}"
+    echo "Val data: ${val_data_path} (${val_dataset_type})"
     echo "=========================================="
 
     CUDA_VISIBLE_DEVICES=${train_gpus} python -u src/main_fm.py \
         --save-frequency 1 \
-        --train-data "composed_image_retrieval/train.sh" \
+        --train-data "${train_data_path}" \
+        --val-data "${val_data_path}" \
+        --dataset-type "${train_dataset_type}" \
+        --dataset-type-val "${val_dataset_type}" \
         --warmup 500 \
         --batch-size 256 \
         --lr 1e-5 \
@@ -84,7 +94,6 @@ do
         --loss-type ${loss_type} \
         --openai-pretrained \
         --model ViT-L/14 \
-        --dataset-type cc3m \
         --resume "${resume_path}" \
         --name "${exp_name}" \
         "${extra_flow_args[@]}"
@@ -100,9 +109,10 @@ do
             --resume "${ckpt_dir}/epoch_${target_epoch}.pt" \
             --eval-mode fashion \
             --loss-type ${loss_type} \
-            --source "${cloth_type}" \
+            --source-data "${cloth_type}" \
             --gpu "${gpu_id}" \
             --model ViT-L/14 \
             "${extra_flow_args[@]}"
     done
 done
+
