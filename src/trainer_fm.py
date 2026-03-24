@@ -265,6 +265,31 @@ def build_global_flow_feature(model, img2text, ref_images, texts, args, source, 
     return _normalize_feature(feature)
 
 
+def flow_matching_inference(flow_net, q, e_m=None, num_steps=4):
+    q = _normalize_feature(q)
+    if e_m is not None:
+        e_m = _normalize_feature(e_m)
+
+    x_t = q.clone()
+    x0 = q.clone()
+    batch_size = q.size(0)
+    dt = 1.0 / num_steps
+
+    for k in range(num_steps):
+        t = torch.full(
+            (batch_size, 1),
+            k / num_steps,
+            device=q.device,
+            dtype=q.dtype,
+        )
+        delta = x_t - x0
+        velocity = flow_net(x_t, delta=delta, e_m=e_m, t=t)
+        velocity = torch.tanh(velocity)
+        x_t = _normalize_feature(x_t + dt * velocity)
+
+    return x_t
+
+
 def parse_batch_for_flow(batch):
     """
     Expected batch format:
@@ -347,8 +372,6 @@ def validate(model, img2text, flow_net, criterion, data, epoch, args, writer=Non
     it.eval()
     flow.eval()
 
-    total_loss_sum = 0.0
-    total_size = 0
     all_query_features = []
     all_target_features = []
     all_answer_names = []
@@ -403,57 +426,22 @@ def validate(model, img2text, flow_net, criterion, data, epoch, args, writer=Non
                         image_weight=getattr(args, "global_flow_condition_image_weight", 1.0),
                     )
                 if target_texts is not None:
-                    y = encode_text_batch(m, target_texts, args)
+                    val_target_features = _normalize_feature(encode_text_batch(m, target_texts, args))
                 elif target_images is not None:
-                    y = encode_image_batch(m, target_images, args)
+                    val_target_features = _normalize_feature(encode_image_batch(m, target_images, args))
                 else:
                     raise ValueError("Validation batch must provide target_texts or target_images.")
 
-                q = _normalize_feature(apply_global_start_noise(q, args))
-                y = _normalize_feature(y)
-                if e_m is not None:
-                    e_m = _normalize_feature(e_m)
-
-                loss_output = criterion(q, y, e_m)
-                batch_loss = loss_output["loss"]
-                val_query_features = q
-                if target_images is not None:
-                    val_target_features = _normalize_feature(encode_image_batch(m, target_images, args))
-                else:
-                    val_target_features = y
+                q = apply_global_start_noise(q, args)
+                val_query_features = flow_matching_inference(
+                    flow_net=flow,
+                    q=q,
+                    e_m=e_m,
+                    num_steps=getattr(args, "flow_num_steps", 16),
+                )
             elif args.loss_type == "sequence":
                 if target_texts is None:
                     raise ValueError("Sequence validation requires target_texts, but got None.")
-                seq_inputs = build_token_level_inputs(
-                    model=m,
-                    ref_images=ref_images,
-                    mod_texts=mod_texts,
-                    target_texts=target_texts,
-                    args=args,
-                )
-                x0 = seq_inputs["src_tokens"]
-                x1 = seq_inputs["tgt_tokens"]
-                t_sample = torch.rand(x0.size(0), 1, device=x0.device, dtype=x0.dtype)
-                x_t = (1.0 - t_sample.unsqueeze(1)) * x0 + t_sample.unsqueeze(1) * x1
-                flow_output = flow(
-                    x_t=x_t,
-                    src_tokens=x0,
-                    vis_tokens=seq_inputs["vis_tokens"],
-                    t=t_sample,
-                    src_mask=seq_inputs["src_mask"],
-                    vis_mask=seq_inputs["vis_mask"],
-                    x_mask=seq_inputs["token_mask"],
-                )
-                loss_output = criterion(
-                    x0=x0,
-                    x1=x1,
-                    x_t=x_t,
-                    velocity=flow_output.velocity,
-                    t=t_sample,
-                    token_mask=seq_inputs["token_mask"],
-                    pred_x1_direct=flow_output.pred_x1,
-                )
-                batch_loss = loss_output.loss
 
                 # For validation retrieval metrics, follow eval-style composed
                 # query / target text feature extraction.
@@ -476,16 +464,12 @@ def validate(model, img2text, flow_net, criterion, data, epoch, args, writer=Non
             else:
                 raise ValueError(f"Unsupported loss_type: {args.loss_type}")
 
-            batch_size = ref_images.size(0)
-            total_loss_sum += batch_loss.item() * batch_size
-            total_size += batch_size
             all_query_features.append(val_query_features.detach().cpu())
             all_target_features.append(val_target_features.detach().cpu())
 
-    if total_size == 0:
+    if len(all_query_features) == 0:
         return None
 
-    mean_val_loss = total_loss_sum / total_size
     val_metrics = {}
     if gallery_features is not None and len(all_query_features) > 0 and len(all_answer_names) > 0:
         query_features = F.normalize(torch.cat(all_query_features, dim=0), dim=-1)
@@ -514,20 +498,19 @@ def validate(model, img2text, flow_net, criterion, data, epoch, args, writer=Non
     if is_master(args):
         metric_text = "\t".join([f"{k}: {v:.4f}" for k, v in val_metrics.items()])
         if metric_text:
-            logging.info(f"Validation Epoch: {epoch}\tLoss: {mean_val_loss:.6f}\t{metric_text}")
+            logging.info(f"Validation Epoch: {epoch}\t{metric_text}")
         else:
-            logging.info(f"Validation Epoch: {epoch}\tLoss: {mean_val_loss:.6f}")
+            logging.info(f"Validation Epoch: {epoch}\tNo retrieval metrics were produced.")
         if writer is not None:
-            writer.add_scalar("val/loss", mean_val_loss, epoch)
             for key, value in val_metrics.items():
                 writer.add_scalar(f"val/{key}", value, epoch)
         if args.wandb:
-            wandb_payload = {"val/loss": mean_val_loss, "epoch": epoch}
+            wandb_payload = {"epoch": epoch}
             for key, value in val_metrics.items():
                 wandb_payload[f"val/{key}"] = value
             wandb.log(wandb_payload)
 
-    return mean_val_loss
+    return val_metrics
 
 
 def train(model, img2text, flow_net, criterion, data, epoch, optimizer, scaler, scheduler, args, writer=None):
