@@ -71,73 +71,17 @@ python src/main_fm.py \
   --save-most-recent \
   --report-to tensorboard
 
-if [ "${disable_delta}" -eq 1 ]; then
-    extra_flow_args+=(--global-flow-disable-delta)
-fi
-
-if [ "${disable_cond_gate}" -eq 1 ]; then
-    extra_flow_args+=(--global-flow-disable-cond-gate)
-fi
-
-# 仅新增：validation dataset 设置（配合 main_fm.py 每10 epoch自动跑 val loss）
-train_data_path="composed_image_retrieval/train.sh"
-val_data_path="composed_image_retrieval/val.sh"
-train_dataset_type="cc3m"
-val_dataset_type="cc3m"
-
-# 每次把总 epoch 设为 20,40,60,80,100
-for target_epoch in 1
-do
-    if [ "${target_epoch}" -eq 1 ]; then
-        resume_path="${init_ckpt}"
-    else
-        prev_epoch=$((target_epoch - 10))
-        resume_path="${ckpt_dir}/epoch_${prev_epoch}.pt"
-    fi
-
-    echo "=========================================="
-    echo "Train to epoch ${target_epoch}"
-    echo "Resume from: ${resume_path}"
-    echo "Flow conditioning: ${flow_conditioning}"
-    echo "Flow start source: ${flow_start_source}"
-    echo "Flow compose method: ${flow_compose_method}"
-    echo "Val data: ${val_data_path} (${val_dataset_type})"
-    echo "=========================================="
-
-    CUDA_VISIBLE_DEVICES=${train_gpus} python -u src/main_fm.py \
-        --save-frequency 1 \
-        --train-data "${train_data_path}" \
-        --val-data "${val_data_path}" \
-        --dataset-type "${train_dataset_type}" \
-        --dataset-type-val "${val_dataset_type}" \
-        --warmup 500 \
-        --batch-size 256 \
-        --lr 1e-5 \
-        --wd 0.1 \
-        --epochs ${target_epoch} \
-        --workers 8 \
-        --loss-type ${loss_type} \
-        --openai-pretrained \
-        --model ViT-L/14 \
-        --resume "${resume_path}" \
-        --name "${exp_name}" \
-        "${extra_flow_args[@]}"
-
-    for cloth_type in dress
-    do
-        echo "------------------------------------------"
-        echo "Eval epoch ${target_epoch}, source=${cloth_type}"
-        echo "------------------------------------------"
-
-        CUDA_VISIBLE_DEVICES=${train_gpus} python src/eval_retrieval_fm.py \
-            --openai-pretrained \
-            --resume "${ckpt_dir}/epoch_${target_epoch}.pt" \
-            --eval-mode fashion \
-            --loss-type ${loss_type} \
-            --source-data "${cloth_type}" \
-            --gpu "${gpu_id}" \
-            --model ViT-L/14 \
-            "${extra_flow_args[@]}"
-    done
-done
-
+# ==========================================================
+# Optional: FashionIQ retrieval evaluation after training
+# (this is offline test/eval, independent from in-training val-loss)
+# ==========================================================
+#
+# python src/eval_retrieval_fm.py \
+#   --name "${EXP_NAME}_fashion_eval" \
+#   --model "${MODEL_NAME}" \
+#   --dataset-type fashion-iq \
+#   --eval-mode fashion \
+#   --source-data dress \
+#   --batch-size 64 \
+#   --workers 8 \
+#   --resume "./logs/${EXP_NAME}/checkpoints/epoch_latest.pt"
