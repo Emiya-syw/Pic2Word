@@ -115,7 +115,7 @@ def parse_args():
     )
     parser.add_argument(
         "--dataset-type-val",
-        choices=["webdataset", "csv", "inet", "auto"],
+        choices=["webdataset", "csv", "inet", "auto", "directory", "fashion-iq", "cirr", "imgnet_r", "flow_matching", "mtcir", "cc3m"],
         default="auto",
         help="Which type of dataset to process."
     )
