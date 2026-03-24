@@ -861,6 +861,60 @@ def get_directory_dataset(args, preprocess_fn, is_train, input_filename=None):
 
     return DataInfo(dataloader, sampler)
 
+
+def get_fashion_iq(args, preprocess_fn, is_train, input_filename=None):
+    if input_filename is None:
+        input_filename = args.train_data if is_train else args.val_data
+    assert input_filename
+
+    cloth = args.source_data if getattr(args, "source_data", None) else "dress"
+    if cloth not in ["dress", "shirt", "toptee"]:
+        raise ValueError(
+            f"Unsupported FashionIQ cloth type: {cloth}. "
+            "Expected one of ['dress', 'shirt', 'toptee']."
+        )
+
+    dataset = FashionIQ(
+        cloth=cloth,
+        transforms=preprocess_fn,
+        root="./data",
+        mode='caps',
+        is_return_target_path=not is_train,
+    )
+    num_samples = len(dataset)
+    sampler = DistributedSampler(dataset) if args.distributed and is_train else None
+    shuffle = is_train and sampler is None
+
+    dataloader = DataLoader(
+        dataset,
+        batch_size=args.batch_size,
+        shuffle=shuffle,
+        num_workers=args.workers,
+        pin_memory=True,
+        sampler=sampler,
+        drop_last=is_train,
+    )
+    dataloader.num_samples = num_samples
+    dataloader.num_batches = len(dataloader)
+    if not is_train:
+        target_dataset = FashionIQ(
+            cloth=cloth,
+            transforms=preprocess_fn,
+            root="./data",
+            mode='imgs',
+        )
+        target_dataloader = DataLoader(
+            target_dataset,
+            batch_size=args.batch_size,
+            shuffle=False,
+            num_workers=args.workers,
+            pin_memory=True,
+            drop_last=False,
+        )
+        dataloader.target_dataloader = target_dataloader
+
+    return DataInfo(dataloader, sampler)
+
 def get_flow_matching_dataset(args, preprocess_fn, is_train, input_filename=None):
     if input_filename is None:
         input_filename = args.train_data if is_train else args.val_data
