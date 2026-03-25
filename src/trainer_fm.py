@@ -106,83 +106,6 @@ def apply_global_start_noise(features, args):
     return features + torch.randn_like(features) * noise_std
 
 
-def build_text_mask(tokens):
-    return tokens.ne(0)
-
-
-def _transformer_forward_until(transformer, x, end_layer):
-    if hasattr(transformer, "forward_until"):
-        return transformer.forward_until(x, end_layer=end_layer)
-
-    blocks = transformer.resblocks
-    if end_layer is None:
-        end_layer = len(blocks)
-    if end_layer < 0:
-        end_layer = len(blocks) + end_layer
-    end_layer = max(0, min(end_layer, len(blocks)))
-    for block in blocks[:end_layer]:
-        x = block(x)
-    return x
-
-
-def extract_text_token_features(model, text, end_layer=-1):
-    if hasattr(model, "encode_text_tokens"):
-        return model.encode_text_tokens(text, end_layer=end_layer)
-
-    x = model.token_embedding(text).type(model.dtype)
-    x = x + model.positional_embedding.type(model.dtype)
-    x = x.permute(1, 0, 2)
-    x = _transformer_forward_until(model.transformer, x, end_layer=end_layer)
-    x = x.permute(1, 0, 2)
-    return x
-
-
-def extract_image_token_features(model, images, end_layer=-1):
-    if hasattr(model, "encode_image_tokens"):
-        return model.encode_image_tokens(images, end_layer=end_layer)
-
-    visual = model.visual
-    if hasattr(visual, "get_intermediate_tokens"):
-        return visual.get_intermediate_tokens(images.type(model.dtype), end_layer=end_layer)
-
-    raise AttributeError("Current CLIP visual encoder does not expose intermediate visual tokens.")
-
-
-def build_token_level_inputs(model, ref_images, mod_texts, target_texts, args):
-    src_tokens = tokenize_to_device(mod_texts, args)
-    tgt_tokens = tokenize_to_device(target_texts, args)
-
-    src_token_features = extract_text_token_features(model, src_tokens, end_layer=-1)
-    tgt_token_features = extract_text_token_features(model, tgt_tokens, end_layer=-1)
-    vis_token_features = extract_image_token_features(model, ref_images, end_layer=-1)
-
-    if args.seq_flow_drop_visual_cls:
-        vis_token_features = vis_token_features[:, 1:, :]
-
-    if args.seq_flow_token_norm:
-        src_token_features = F.normalize(src_token_features, dim=-1)
-        tgt_token_features = F.normalize(tgt_token_features, dim=-1)
-        vis_token_features = F.normalize(vis_token_features, dim=-1)
-
-    src_mask = build_text_mask(src_tokens)
-    tgt_mask = build_text_mask(tgt_tokens)
-    token_mask = src_mask | tgt_mask
-    vis_mask = torch.ones(
-        vis_token_features.shape[:2],
-        device=vis_token_features.device,
-        dtype=torch.bool,
-    )
-
-    return {
-        "src_tokens": src_token_features,
-        "tgt_tokens": tgt_token_features,
-        "vis_tokens": vis_token_features,
-        "src_mask": src_mask,
-        "tgt_mask": tgt_mask,
-        "token_mask": token_mask,
-        "vis_mask": vis_mask,
-    }
-
 def get_text_features(model, token_features, args):
     """
     Image-derived token features -> CLIP text encoder.
@@ -401,48 +324,45 @@ def validate(model, img2text, flow_net, criterion, data, epoch, args, writer=Non
             if target_images is not None:
                 target_images = move_to_device(target_images, args.gpu)
 
-            if args.loss_type == "global":
-                q = build_global_flow_feature(
+            if args.loss_type != "global":
+                raise ValueError(f"Unsupported loss_type: {args.loss_type}")
+            q = build_global_flow_feature(
+                model=m,
+                img2text=it,
+                ref_images=ref_images,
+                texts=mod_texts,
+                args=args,
+                source=getattr(args, "global_flow_start_source", "text"),
+                text_weight=getattr(args, "global_flow_start_text_weight", 1.0),
+                image_weight=getattr(args, "global_flow_start_image_weight", 1.0),
+            )
+            use_condition = getattr(args, "global_flow_conditioning", "enabled") == "enabled"
+            e_m = None
+            if use_condition:
+                e_m = build_global_flow_feature(
                     model=m,
                     img2text=it,
                     ref_images=ref_images,
                     texts=mod_texts,
                     args=args,
-                    source=getattr(args, "global_flow_start_source", "text"),
-                    text_weight=getattr(args, "global_flow_start_text_weight", 1.0),
-                    image_weight=getattr(args, "global_flow_start_image_weight", 1.0),
+                    source=getattr(args, "global_flow_condition_source", "image"),
+                    text_weight=getattr(args, "global_flow_condition_text_weight", 1.0),
+                    image_weight=getattr(args, "global_flow_condition_image_weight", 1.0),
                 )
-                use_condition = getattr(args, "global_flow_conditioning", "enabled") == "enabled"
-                e_m = None
-                if use_condition:
-                    e_m = build_global_flow_feature(
-                        model=m,
-                        img2text=it,
-                        ref_images=ref_images,
-                        texts=mod_texts,
-                        args=args,
-                        source=getattr(args, "global_flow_condition_source", "image"),
-                        text_weight=getattr(args, "global_flow_condition_text_weight", 1.0),
-                        image_weight=getattr(args, "global_flow_condition_image_weight", 1.0),
-                    )
-                if target_texts is not None:
-                    val_target_features = _normalize_feature(encode_text_batch(m, target_texts, args))
-                elif target_images is not None:
-                    val_target_features = _normalize_feature(encode_image_batch(m, target_images, args))
-                else:
-                    raise ValueError("Validation batch must provide target_texts or target_images.")
-
-                q = apply_global_start_noise(q, args)
-                val_query_features = flow_matching_inference(
-                    flow_net=flow,
-                    q=q,
-                    e_m=e_m,
-                    num_steps=getattr(args, "flow_num_steps", 16),
-                )
-            elif args.loss_type == "sequence":
-                pass
+            if target_texts is not None:
+                val_target_features = _normalize_feature(encode_text_batch(m, target_texts, args))
+            elif target_images is not None:
+                val_target_features = _normalize_feature(encode_image_batch(m, target_images, args))
             else:
-                raise ValueError(f"Unsupported loss_type: {args.loss_type}")
+                raise ValueError("Validation batch must provide target_texts or target_images.")
+
+            q = apply_global_start_noise(q, args)
+            val_query_features = flow_matching_inference(
+                flow_net=flow,
+                q=q,
+                e_m=e_m,
+                num_steps=getattr(args, "flow_num_steps", 16),
+            )
 
             all_query_features.append(val_query_features.detach().cpu())
             all_target_features.append(val_target_features.detach().cpu())
@@ -547,130 +467,57 @@ def train(model, img2text, flow_net, criterion, data, epoch, optimizer, scaler, 
         # y   : target/generated caption -> text encoder
         # --------------------------------------------------
         with torch.no_grad():
-            if args.loss_type == "global":
-                q = build_global_flow_feature(
+            if args.loss_type != "global":
+                raise ValueError(f"Unsupported loss_type: {args.loss_type}")
+            q = build_global_flow_feature(
+                model=m,
+                img2text=it,
+                ref_images=ref_images,
+                texts=mod_texts,
+                args=args,
+                source=getattr(args, "global_flow_start_source", "text"),
+                text_weight=getattr(args, "global_flow_start_text_weight", 1.0),
+                image_weight=getattr(args, "global_flow_start_image_weight", 1.0),
+            )
+            use_condition = getattr(args, "global_flow_conditioning", "enabled") == "enabled"
+            e_m = None
+            if use_condition:
+                e_m = build_global_flow_feature(
                     model=m,
                     img2text=it,
                     ref_images=ref_images,
                     texts=mod_texts,
                     args=args,
-                    source=getattr(args, "global_flow_start_source", "text"),
-                    text_weight=getattr(args, "global_flow_start_text_weight", 1.0),
-                    image_weight=getattr(args, "global_flow_start_image_weight", 1.0),
+                    source=getattr(args, "global_flow_condition_source", "image"),
+                    text_weight=getattr(args, "global_flow_condition_text_weight", 1.0),
+                    image_weight=getattr(args, "global_flow_condition_image_weight", 1.0),
                 )
-                use_condition = getattr(args, "global_flow_conditioning", "enabled") == "enabled"
-                e_m = None
-                if use_condition:
-                    e_m = build_global_flow_feature(
-                        model=m,
-                        img2text=it,
-                        ref_images=ref_images,
-                        texts=mod_texts,
-                        args=args,
-                        source=getattr(args, "global_flow_condition_source", "image"),
-                        text_weight=getattr(args, "global_flow_condition_text_weight", 1.0),
-                        image_weight=getattr(args, "global_flow_condition_image_weight", 1.0),
-                    )
-                y = encode_text_batch(m, target_texts, args)
+            y = encode_text_batch(m, target_texts, args)
 
-                q = apply_global_start_noise(q, args)
-                q = _normalize_feature(q)
-                y = _normalize_feature(y)
-                if e_m is not None:
-                    e_m = _normalize_feature(e_m)
-            elif args.loss_type == "sequence":
-                seq_inputs = build_token_level_inputs(
-                    model=m,
-                    ref_images=ref_images,
-                    mod_texts=mod_texts,
-                    target_texts=target_texts,
-                    args=args,
-                )
-            else:
-                raise ValueError(f"Unsupported loss_type: {args.loss_type}")
+            q = apply_global_start_noise(q, args)
+            q = _normalize_feature(q)
+            y = _normalize_feature(y)
+            if e_m is not None:
+                e_m = _normalize_feature(e_m)
 
         # --------------------------------------------------
         # 3. flow matching loss
         # --------------------------------------------------
         if args.precision == "amp":
             with autocast():
-                if args.loss_type == "global":
-                    loss_dict = criterion(q, y, e_m)
-                    total_loss = loss_dict["loss"]
-                else:
-                    x0 = seq_inputs["src_tokens"]
-                    x1 = seq_inputs["tgt_tokens"]
-                    t_sample = torch.rand(x0.size(0), 1, device=x0.device, dtype=x0.dtype)
-                    x_t = (1.0 - t_sample.unsqueeze(1)) * x0 + t_sample.unsqueeze(1) * x1
-                    flow_output = flow_net(
-                        x_t=x_t,
-                        src_tokens=x0,
-                        vis_tokens=seq_inputs["vis_tokens"],
-                        t=t_sample,
-                        src_mask=seq_inputs["src_mask"],
-                        vis_mask=seq_inputs["vis_mask"],
-                        x_mask=seq_inputs["token_mask"],
-                    )
-                    loss_output = criterion(
-                        x0=x0,
-                        x1=x1,
-                        x_t=x_t,
-                        velocity=flow_output.velocity,
-                        t=t_sample,
-                        token_mask=seq_inputs["token_mask"],
-                        pred_x1_direct=flow_output.pred_x1,
-                    )
-                    total_loss = loss_output.loss
-                    loss_dict = {
-                        "loss": total_loss,
-                        "loss_fm": loss_output.loss_dict["fm"],
-                        "loss_end": loss_output.loss_dict["end"],
-                        "loss_ret": torch.zeros_like(loss_output.loss_dict["tok"]),
-                        "loss_tok": loss_output.loss_dict["tok"],
-                        "loss_keep": loss_output.loss_dict["keep"],
-                        "loss_direct_end": loss_output.loss_dict["direct_end"],
-                    }
+                if args.loss_type != "global":
+                    raise ValueError(f"Unsupported loss_type: {args.loss_type}")
+                loss_dict = criterion(q, y, e_m)
+                total_loss = loss_dict["loss"]
 
             scaler.scale(total_loss).backward()
             scaler.step(optimizer)
             scaler.update()
         else:
-            if args.loss_type == "global":
-                loss_dict = criterion(q, y, e_m)
-                total_loss = loss_dict["loss"]
-            else:
-                x0 = seq_inputs["src_tokens"]
-                x1 = seq_inputs["tgt_tokens"]
-                t_sample = torch.rand(x0.size(0), 1, device=x0.device, dtype=x0.dtype)
-                x_t = (1.0 - t_sample.unsqueeze(1)) * x0 + t_sample.unsqueeze(1) * x1
-                flow_output = flow_net(
-                    x_t=x_t,
-                    src_tokens=x0,
-                    vis_tokens=seq_inputs["vis_tokens"],
-                    t=t_sample,
-                    src_mask=seq_inputs["src_mask"],
-                    vis_mask=seq_inputs["vis_mask"],
-                    x_mask=seq_inputs["token_mask"],
-                )
-                loss_output = criterion(
-                    x0=x0,
-                    x1=x1,
-                    x_t=x_t,
-                    velocity=flow_output.velocity,
-                    t=t_sample,
-                    token_mask=seq_inputs["token_mask"],
-                    pred_x1_direct=flow_output.pred_x1,
-                )
-                total_loss = loss_output.loss
-                loss_dict = {
-                    "loss": total_loss,
-                    "loss_fm": loss_output.loss_dict["fm"],
-                    "loss_end": loss_output.loss_dict["end"],
-                    "loss_ret": torch.zeros_like(loss_output.loss_dict["tok"]),
-                    "loss_tok": loss_output.loss_dict["tok"],
-                    "loss_keep": loss_output.loss_dict["keep"],
-                    "loss_direct_end": loss_output.loss_dict["direct_end"],
-                }
+            if args.loss_type != "global":
+                raise ValueError(f"Unsupported loss_type: {args.loss_type}")
+            loss_dict = criterion(q, y, e_m)
+            total_loss = loss_dict["loss"]
             total_loss.backward()
             optimizer.step()
 
@@ -686,21 +533,12 @@ def train(model, img2text, flow_net, criterion, data, epoch, optimizer, scaler, 
             samples_per_epoch = dataloader.num_samples
             percent_complete = 100.0 * i / num_batches_per_epoch
 
-            extra_log = ""
-            if args.loss_type == "sequence":
-                extra_log = (
-                    f"\tTok: {loss_dict['loss_tok'].item():.6f}"
-                    f"\tKeep: {loss_dict['loss_keep'].item():.6f}"
-                    f"\tDirectEnd: {loss_dict['loss_direct_end'].item():.6f}"
-                )
-
             logging.info(
                 f"Train Epoch: {epoch} [{num_samples}/{samples_per_epoch} ({percent_complete:.0f}%)]\t"
                 f"Loss: {total_loss.item():.6f}\t"
                 f"FM: {loss_dict['loss_fm'].item():.6f}\t"
                 f"End: {loss_dict['loss_end'].item():.6f}\t"
                 f"Ret: {loss_dict['loss_ret'].item():.6f}\t"
-                f"{extra_log}"
                 f"Data (t) {data_time:.3f}\tBatch (t) {batch_time:.3f}\t"
                 f"LR: {optimizer.param_groups[0]['lr']:.6e}"
             )
@@ -715,13 +553,6 @@ def train(model, img2text, flow_net, criterion, data, epoch, optimizer, scaler, 
                 "batch_time": batch_time,
                 "lr": optimizer.param_groups[0]["lr"],
             }
-
-            if args.loss_type == "sequence":
-                log_data.update({
-                    "loss_tok": loss_dict["loss_tok"].item(),
-                    "loss_keep": loss_dict["loss_keep"].item(),
-                    "loss_direct_end": loss_dict["loss_direct_end"].item(),
-                })
 
             for name, val in log_data.items():
                 tag = "train/" + name

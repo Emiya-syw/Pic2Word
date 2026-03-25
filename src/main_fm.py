@@ -38,7 +38,7 @@ sys.path.insert(0, "/home/sunyw/CIR/Pic2Word")
 
 from third_party.open_clip.scheduler import cosine_lr
 from model.clip import _transform, load
-from model.model import convert_weights, CLIP, IM2TEXT, VisualTransformer
+from model.model import convert_weights, CLIP, IM2TEXT
 from trainer_fm import train, validate
 from data import get_data
 from params import parse_args
@@ -48,8 +48,6 @@ from utils import is_master, convert_models_to_fp32
 # ===== Flow Matching =====
 from model.residual_flow_matching_module import ConditionalFlowNet
 from model.flow_matching_loss import FlowMatchingLoss
-from model.seq_flow_matching_loss import TokenFlowMatchingLoss
-from model.seq_flow_matching_module import TokenFlowNet
 
 
 def unwrap_model(model):
@@ -227,34 +225,17 @@ def main_worker(gpu, ngpus_per_node, log_queue, args):
     # 3. Flow net
     # Only this module is optimized
     # --------------------------------------------------
-    if args.loss_type == "global":
-        flow_embed_dim = getattr(model, "embed_dim", 1024)
-        flow_net = ConditionalFlowNet(
-            dim=flow_embed_dim,
-            time_dim=args.flow_time_dim,
-            hidden_dim=args.flow_hidden_dim,
-            use_delta=args.global_flow_use_delta,
-            use_condition=args.global_flow_conditioning == "enabled",
-            use_cond_gate=args.global_flow_use_cond_gate,
-        )
-    elif args.loss_type == "sequence":
-        if not isinstance(model.visual, VisualTransformer):
-            raise ValueError(
-                "Sequence flow matching requires a ViT-based CLIP model so that visual token sequences are available."
-            )
-        flow_net = TokenFlowNet(
-            text_dim=model.transformer_width,
-            vis_dim=model.visual.conv1.out_channels,
-            model_dim=args.seq_flow_model_dim,
-            depth=args.seq_flow_depth,
-            num_heads=args.seq_flow_heads,
-            time_dim=args.flow_time_dim,
-            num_vis_queries=args.seq_flow_num_vis_queries,
-            dropout=args.seq_flow_dropout,
-            predict_residual=args.seq_flow_predict_residual,
-        )
-    else:
+    if args.loss_type != "global":
         raise ValueError(f"Unsupported loss_type: {args.loss_type}")
+    flow_embed_dim = getattr(model, "embed_dim", 1024)
+    flow_net = ConditionalFlowNet(
+        dim=flow_embed_dim,
+        time_dim=args.flow_time_dim,
+        hidden_dim=args.flow_hidden_dim,
+        use_delta=args.global_flow_use_delta,
+        use_condition=args.global_flow_conditioning == "enabled",
+        use_cond_gate=args.global_flow_use_cond_gate,
+    )
 
     # --------------------------------------------------
     # 4. Freeze modules that should not be updated
@@ -307,28 +288,18 @@ def main_worker(gpu, ngpus_per_node, log_queue, args):
     # --------------------------------------------------
     # 7. Criterion
     # --------------------------------------------------
-    if args.loss_type == "global":
-        criterion = FlowMatchingLoss(
-            flow_net=flow_net,
-            num_steps=args.flow_num_steps,
-            lambda_fm=args.lambda_fm,
-            lambda_end=args.lambda_end,
-            lambda_ret=args.lambda_ret,
-            # lambda_mid=args.lambda_mid,
-            temperature=args.flow_temperature,
-            normalize=True,
-        ).to(device)
-    elif args.loss_type == "sequence":
-        criterion = TokenFlowMatchingLoss(
-            lambda_fm=args.lambda_fm,
-            lambda_end=args.lambda_end,
-            lambda_tok=args.lambda_tok,
-            lambda_keep=args.lambda_keep,
-            lambda_direct_end=args.lambda_direct_end,
-            keep_threshold=args.flow_keep_threshold,
-        ).to(device)
-    else:
+    if args.loss_type != "global":
         raise ValueError(f"Unsupported loss_type: {args.loss_type}")
+    criterion = FlowMatchingLoss(
+        flow_net=flow_net,
+        num_steps=args.flow_num_steps,
+        lambda_fm=args.lambda_fm,
+        lambda_end=args.lambda_end,
+        lambda_ret=args.lambda_ret,
+        # lambda_mid=args.lambda_mid,
+        temperature=args.flow_temperature,
+        normalize=True,
+    ).to(device)
 
     # --------------------------------------------------
     # 8. Optimizer / Scheduler
