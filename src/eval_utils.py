@@ -974,15 +974,27 @@ def get_metrics_coco(image_features, ref_features, logit_scale):
 
 def get_metrics_fashion(image_features, ref_features, target_names, answer_names):
     metrics = {}
-    distances = 1 - ref_features @ image_features.T    
-    sorted_indices = torch.argsort(distances, dim=-1).cpu()
-    sorted_index_names = np.array(target_names)[sorted_indices]
-    labels = torch.tensor(
-        sorted_index_names == np.repeat(np.array(answer_names), len(target_names)).reshape(len(answer_names), -1))
-    assert torch.equal(torch.sum(labels, dim=-1).int(), torch.ones(len(answer_names)).int())
-    # Compute the metrics
+    # distances = 1 - ref_features @ image_features.T    
+    # sorted_indices = torch.argsort(distances, dim=-1).cpu()
+    # sorted_index_names = np.array(target_names)[sorted_indices]
+    # labels = torch.tensor(
+    #     sorted_index_names == np.repeat(np.array(answer_names), len(target_names)).reshape(len(answer_names), -1))
+    # assert torch.equal(torch.sum(labels, dim=-1).int(), torch.ones(len(answer_names)).int())
+    # # Compute the metrics
+    # for k in [1, 5, 10, 50, 100]:
+    #     metrics[f"R@{k}"] = (torch.sum(labels[:, :k]) / len(labels)).item() * 100
+    query_features = F.normalize(ref_features.detach().cpu(), dim=-1)
+    gallery_features = F.normalize(image_features.detach().cpu(), dim=-1)
+
+    logits = query_features @ gallery_features.t()
+    ranking = torch.argsort(logits, dim=-1, descending=True)
+
+    name_to_index = {name: idx for idx, name in enumerate(target_names)}
+    gt_index = torch.tensor([name_to_index[name] for name in answer_names], dtype=torch.long)
+    gt_pos = torch.where(ranking == gt_index.view(-1, 1))[1]
     for k in [1, 5, 10, 50, 100]:
-        metrics[f"R@{k}"] = (torch.sum(labels[:, :k]) / len(labels)).item() * 100
+        k_eff = min(k, ranking.size(1))
+        metrics[f"R@{k}"] = (gt_pos < k_eff).float().mean().item() * 100.0
     return metrics
 
 
@@ -1172,7 +1184,6 @@ def evaluate_fashion_fm(model, img2text, args, source_loader, target_loader, flo
                         ref_token_features=src_tokens,
                         pooling_k=getattr(args, "seq_flow_pooling_k", 3),
                     )
-                    flow_feature = flow_feature / flow_feature.norm(dim=-1, keepdim=True).clamp(min=1e-6)
                 else:
                     q = build_global_flow_feature(
                         model=m,
@@ -1208,6 +1219,7 @@ def evaluate_fashion_fm(model, img2text, args, source_loader, target_loader, flo
                         e_m,
                         num_steps=getattr(args, "flow_num_steps", 16)
                     )
+                flow_feature = flow_feature / flow_feature.norm(dim=-1, keepdim=True)
                 all_flow_features.append(flow_feature)
 
             all_caption_features.append(caption_features)

@@ -1051,4 +1051,4 @@ def get_data(args, preprocess_fns):
         data["imagenet-val"] = get_imagenet(args, preprocess_fns, "val")
     if args.imagenet_v2 is not None:
         data["imagenet-v2"] = get_imagenet(args, preprocess_fns, "v2")
-    return data
+    return

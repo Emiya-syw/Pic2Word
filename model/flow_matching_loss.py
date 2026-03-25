@@ -108,8 +108,6 @@ class FlowMatchingLoss(nn.Module):
             )
 
             v = self._flow_net_call(x, q, e_m, t)
-            ###
-            v = torch.tanh(v)
             x = x + dt * v
 
             if self.normalize:

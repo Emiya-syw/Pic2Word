@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-exp_name="fm_composed_dress"
+exp_name="fm_composed_1e-4"
 gpu_id=0
 train_gpus="0,1,2,3,4,5,6,7"
 
@@ -59,7 +59,7 @@ train_data_path="composed_image_retrieval/train.sh"
 val_data_path="composed_image_retrieval/val.sh"
 train_dataset_type="cc3m"
 val_dataset_type="fashion-iq"
-target_epoch=10
+target_epoch=40
 
 echo "=========================================="
 echo "Train to epoch ${target_epoch}"
@@ -71,7 +71,7 @@ echo "Val data: ${val_data_path} (${val_dataset_type})"
 echo "=========================================="
 
 CUDA_VISIBLE_DEVICES=${train_gpus} python -u src/main_fm.py \
-    --save-frequency 10 \
+    --save-frequency 1 \
     --train-data "${train_data_path}" \
     --val-data "${val_data_path}" \
     --dataset-type "${train_dataset_type}" \

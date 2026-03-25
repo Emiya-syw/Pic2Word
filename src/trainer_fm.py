@@ -460,7 +460,7 @@ def validate(model, img2text, flow_net, criterion, data, epoch, args, writer=Non
         gt_index = torch.tensor([name_to_index[name] for name in all_answer_names], dtype=torch.long)
         gt_pos = torch.where(ranking == gt_index.view(-1, 1))[1]
 
-        for k in [5, 10, 50]:
+        for k in [1, 5, 10, 50, 100]:
             k_eff = min(k, ranking.size(1))
             val_metrics[f"R@{k}"] = (gt_pos < k_eff).float().mean().item() * 100.0
     elif len(all_query_features) > 0 and len(all_target_features) > 0:
@@ -471,7 +471,7 @@ def validate(model, img2text, flow_net, criterion, data, epoch, args, writer=Non
         gt = torch.arange(ranking.size(0)).view(-1, 1)
         gt_pos = torch.where(ranking == gt)[1]
 
-        for k in [5, 10, 50]:
+        for k in [1, 5, 10, 50, 100]:
             k_eff = min(k, ranking.size(1))
             val_metrics[f"R@{k}"] = (gt_pos < k_eff).float().mean().item() * 100.0
 
