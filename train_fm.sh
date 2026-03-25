@@ -12,3 +12,6 @@ python -u src/main_fm.py \
     --dataset-type flow_matching \
     --resume home/sunyw/CIR/Pic2Word/weights/pic2word_model.pt \
     --name fm_t_v_simple_sphere_w_end
+    # optional:
+    # --flow-path-type geodesic \
+    # --flow-geodesic-eps 1e-4

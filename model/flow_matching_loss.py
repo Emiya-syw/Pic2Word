@@ -27,6 +27,8 @@ class FlowMatchingLoss(nn.Module):
         temperature=0.07,
         gamma=1.5,
         eps=1e-6,
+        path_type="linear",
+        geodesic_eps=1e-4,
     ):
         """
         A simplified and more stable flow matching loss.
@@ -52,6 +54,8 @@ class FlowMatchingLoss(nn.Module):
         self.temperature = temperature
         self.gamma = gamma
         self.eps = eps
+        self.path_type = path_type
+        self.geodesic_eps = geodesic_eps
 
     def _maybe_normalize_inputs(self, q, y, e_m=None):
         if self.normalize:
@@ -61,17 +65,47 @@ class FlowMatchingLoss(nn.Module):
                 e_m = l2norm(e_m, eps=self.eps)
         return q, y, e_m
 
-    def _path_target(self, q, y, t):
-        """
-        Non-normalized straight-line path:
-            x_t = (1 - t) q + t y
-
-        Constant target velocity:
-            u_star = y - q
-        """
+    def _linear_path_target(self, q, y, t):
+        """Euclidean / linear path with constant velocity."""
         x_t = (1.0 - t) * q + t * y
         u_star = y - q
         return x_t, u_star
+
+    def _geodesic_path_target(self, q, y, t):
+        """
+        Geodesic path on unit sphere (slerp) and its analytic velocity:
+            gamma(t) = sin((1-t)theta)/sin(theta) * q + sin(t*theta)/sin(theta) * y
+            theta = arccos(q^T y)
+        """
+        q_n = l2norm(q, eps=self.eps)
+        y_n = l2norm(y, eps=self.eps)
+
+        dot = (q_n * y_n).sum(dim=-1, keepdim=True).clamp(-1.0 + self.eps, 1.0 - self.eps)
+        theta = torch.acos(dot)
+        sin_theta = torch.sin(theta)
+
+        near_singular = sin_theta.abs() < self.geodesic_eps
+        sin_theta_safe = sin_theta.clamp(min=self.geodesic_eps)
+
+        coeff_q = torch.sin((1.0 - t) * theta) / sin_theta_safe
+        coeff_y = torch.sin(t * theta) / sin_theta_safe
+        x_t_geo = coeff_q * q_n + coeff_y * y_n
+
+        vel_q = -theta * torch.cos((1.0 - t) * theta) / sin_theta_safe
+        vel_y = theta * torch.cos(t * theta) / sin_theta_safe
+        u_star_geo = vel_q * q_n + vel_y * y_n
+
+        x_t_lin, u_star_lin = self._linear_path_target(q_n, y_n, t)
+        x_t = torch.where(near_singular, x_t_lin, x_t_geo)
+        u_star = torch.where(near_singular, u_star_lin, u_star_geo)
+        return x_t, u_star
+
+    def _path_target(self, q, y, t):
+        if self.path_type == "linear":
+            return self._linear_path_target(q, y, t)
+        if self.path_type == "geodesic":
+            return self._geodesic_path_target(q, y, t)
+        raise ValueError(f"Unsupported path_type: {self.path_type}")
 
     def _flow_net_call(self, x, q0, e_m, t):
         """
