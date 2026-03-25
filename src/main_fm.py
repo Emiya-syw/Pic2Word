@@ -302,6 +302,7 @@ def main_worker(gpu, ngpus_per_node, log_queue, args):
         geodesic_eps=args.flow_geodesic_eps,
         normalize=True,
         step_normalize=getattr(args, "flow_step_normalize", args.flow_path_type != "linear"),
+        step_norm_type=getattr(args, "flow_step_norm_type", "l2"),
     ).to(device)
 
     # --------------------------------------------------
@@ -582,6 +583,8 @@ def main():
         args.flow_geodesic_eps = 1e-4
     if not hasattr(args, "flow_step_norm_mode"):
         args.flow_step_norm_mode = "auto"
+    if not hasattr(args, "flow_step_norm_type"):
+        args.flow_step_norm_type = "l2"
     if not hasattr(args, "flow_step_normalize"):
         if args.flow_step_norm_mode == "on":
             args.flow_step_normalize = True

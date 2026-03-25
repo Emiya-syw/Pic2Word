@@ -362,6 +362,13 @@ def parse_args():
         ),
     )
     parser.add_argument(
+        "--flow-step-norm-type",
+        type=str,
+        choices=["l2", "expmap"],
+        default="l2",
+        help="Per-step normalization update type when enabled: l2 projection or sphere exponential-map update.",
+    )
+    parser.add_argument(
         "--global-start-noise-std",
         type=float,
         default=0.0,

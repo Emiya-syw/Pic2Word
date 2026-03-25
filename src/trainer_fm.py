@@ -140,6 +140,16 @@ def _normalize_feature(x, eps=1e-6):
     return x / x.norm(dim=-1, keepdim=True).clamp(min=eps)
 
 
+def _sphere_expmap_step(x, v, dt, eps=1e-6):
+    x_unit = _normalize_feature(x, eps=eps)
+    v_tan = v - (v * x_unit).sum(dim=-1, keepdim=True) * x_unit
+    speed = v_tan.norm(dim=-1, keepdim=True).clamp(min=eps)
+    theta = dt * speed
+    direction = v_tan / speed
+    x_next = torch.cos(theta) * x_unit + torch.sin(theta) * direction
+    return _normalize_feature(x_next, eps=eps)
+
+
 def encode_pic2word_composed_feature(model, img2text, images, texts, args):
     text_tokens = tokenize_to_device(texts, args)
     split_text = getattr(args, "global_flow_pic2word_marker", "*")
@@ -188,7 +198,7 @@ def build_global_flow_feature(model, img2text, ref_images, texts, args, source, 
     return _normalize_feature(feature)
 
 
-def flow_matching_inference(flow_net, q, e_m=None, num_steps=4, step_normalize=True):
+def flow_matching_inference(flow_net, q, e_m=None, num_steps=4, step_normalize=True, step_norm_type="l2"):
     q = _normalize_feature(q)
     if e_m is not None:
         e_m = _normalize_feature(e_m)
@@ -208,9 +218,13 @@ def flow_matching_inference(flow_net, q, e_m=None, num_steps=4, step_normalize=T
         delta = x_t - x0
         velocity = flow_net(x_t, delta=delta, e_m=e_m, t=t)
         velocity = torch.tanh(velocity)
-        x_t = x_t + dt * velocity
         if step_normalize:
-            x_t = _normalize_feature(x_t)
+            if step_norm_type == "expmap":
+                x_t = _sphere_expmap_step(x_t, velocity, dt=dt)
+            else:
+                x_t = _normalize_feature(x_t + dt * velocity)
+        else:
+            x_t = x_t + dt * velocity
 
     return x_t
 
@@ -365,6 +379,7 @@ def validate(model, img2text, flow_net, criterion, data, epoch, args, writer=Non
                 e_m=e_m,
                 num_steps=getattr(args, "flow_num_steps", 16),
                 step_normalize=getattr(args, "flow_step_normalize", True),
+                step_norm_type=getattr(args, "flow_step_norm_type", "l2"),
             )
 
             all_query_features.append(val_query_features.detach().cpu())

@@ -15,6 +15,21 @@ def l2norm(x, dim=-1, eps=1e-6):
     return x / x.norm(dim=dim, keepdim=True).clamp(min=eps)
 
 
+def sphere_expmap_step(x, v, dt, eps=1e-6):
+    """
+    Exponential-map update on unit sphere:
+        x_next = cos(dt*||v_tan||) * x + sin(dt*||v_tan||) * v_tan/||v_tan||
+    where v_tan is the projection of v onto the tangent space at x.
+    """
+    x_unit = l2norm(x, eps=eps)
+    v_tan = v - (v * x_unit).sum(dim=-1, keepdim=True) * x_unit
+    speed = v_tan.norm(dim=-1, keepdim=True).clamp(min=eps)
+    theta = dt * speed
+    direction = v_tan / speed
+    x_next = torch.cos(theta) * x_unit + torch.sin(theta) * direction
+    return l2norm(x_next, eps=eps)
+
+
 class FlowMatchingLoss(nn.Module):
     def __init__(
         self,
@@ -30,6 +45,7 @@ class FlowMatchingLoss(nn.Module):
         path_type="linear",
         geodesic_eps=1e-4,
         step_normalize=True,
+        step_norm_type="l2",
     ):
         """
         A simplified and more stable flow matching loss.
@@ -58,6 +74,7 @@ class FlowMatchingLoss(nn.Module):
         self.path_type = path_type
         self.geodesic_eps = geodesic_eps
         self.step_normalize = step_normalize
+        self.step_norm_type = step_norm_type
 
     def _maybe_normalize_inputs(self, q, y, e_m=None):
         if self.normalize:
@@ -137,10 +154,13 @@ class FlowMatchingLoss(nn.Module):
             )
 
             v = self._flow_net_call(x, q, e_m, t)
-            x = x + dt * v
-
             if self.step_normalize:
-                x = l2norm(x, eps=self.eps)
+                if self.step_norm_type == "expmap":
+                    x = sphere_expmap_step(x, v, dt=dt, eps=self.eps)
+                else:
+                    x = l2norm(x + dt * v, eps=self.eps)
+            else:
+                x = x + dt * v
 
         return x
 
