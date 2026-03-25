@@ -188,7 +188,7 @@ def build_global_flow_feature(model, img2text, ref_images, texts, args, source, 
     return _normalize_feature(feature)
 
 
-def flow_matching_inference(flow_net, q, e_m=None, num_steps=4):
+def flow_matching_inference(flow_net, q, e_m=None, num_steps=4, step_normalize=True):
     q = _normalize_feature(q)
     if e_m is not None:
         e_m = _normalize_feature(e_m)
@@ -208,7 +208,9 @@ def flow_matching_inference(flow_net, q, e_m=None, num_steps=4):
         delta = x_t - x0
         velocity = flow_net(x_t, delta=delta, e_m=e_m, t=t)
         velocity = torch.tanh(velocity)
-        x_t = _normalize_feature(x_t + dt * velocity)
+        x_t = x_t + dt * velocity
+        if step_normalize:
+            x_t = _normalize_feature(x_t)
 
     return x_t
 
@@ -362,6 +364,7 @@ def validate(model, img2text, flow_net, criterion, data, epoch, args, writer=Non
                 q=q,
                 e_m=e_m,
                 num_steps=getattr(args, "flow_num_steps", 16),
+                step_normalize=getattr(args, "flow_step_normalize", True),
             )
 
             all_query_features.append(val_query_features.detach().cpu())
