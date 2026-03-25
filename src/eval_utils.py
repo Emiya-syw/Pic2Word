@@ -277,9 +277,26 @@ def encode_text_from_token_features(
     x = pooled @ model.text_projection
     return x
 
-def flow_matching_inference(flow_net, q, e_m=None, num_steps=4, eps=1e-6):
+def flow_matching_inference(
+    flow_net,
+    q,
+    e_m=None,
+    num_steps=4,
+    eps=1e-6,
+    step_normalize=True,
+    step_norm_type="l2",
+):
     def l2norm(x):
         return x / x.norm(dim=-1, keepdim=True).clamp(min=eps)
+
+    def sphere_expmap_step(x, v, dt):
+        x_unit = l2norm(x)
+        v_tan = v - (v * x_unit).sum(dim=-1, keepdim=True) * x_unit
+        speed = v_tan.norm(dim=-1, keepdim=True).clamp(min=eps)
+        theta = dt * speed
+        direction = v_tan / speed
+        x_next = torch.cos(theta) * x_unit + torch.sin(theta) * direction
+        return l2norm(x_next)
 
     q = l2norm(q)
     if e_m is not None:
@@ -300,8 +317,13 @@ def flow_matching_inference(flow_net, q, e_m=None, num_steps=4, eps=1e-6):
         delta = x_t - x0
         v = flow_net(x_t, delta=delta, e_m=e_m, t=t)
         v = torch.tanh(v)
-        x_t = x_t + dt * v
-        x_t = l2norm(x_t)
+        if step_normalize:
+            if step_norm_type == "expmap":
+                x_t = sphere_expmap_step(x_t, v, dt=dt)
+            else:
+                x_t = l2norm(x_t + dt * v)
+        else:
+            x_t = x_t + dt * v
 
     return x_t
 
@@ -926,6 +948,8 @@ def evaluate_cirr_fm(model, img2text, args, query_loader, target_loader, flow_ne
                         q,
                         e_m,
                         num_steps=getattr(args, "flow_num_steps", 16),
+                        step_normalize=getattr(args, "flow_step_normalize", True),
+                        step_norm_type=getattr(args, "flow_step_norm_type", "l2"),
                     )
 
                 flow_feature = flow_feature / flow_feature.norm(dim=-1, keepdim=True)
@@ -1387,7 +1411,9 @@ def evaluate_fashion_fm(model, img2text, args, source_loader, target_loader, flo
                         fm,
                         q,
                         e_m,
-                        num_steps=getattr(args, "flow_num_steps", 16)
+                        num_steps=getattr(args, "flow_num_steps", 16),
+                        step_normalize=getattr(args, "flow_step_normalize", True),
+                        step_norm_type=getattr(args, "flow_step_norm_type", "l2"),
                     )
                 flow_feature = flow_feature / flow_feature.norm(dim=-1, keepdim=True)
                 all_flow_features.append(flow_feature)

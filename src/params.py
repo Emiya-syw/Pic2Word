@@ -352,6 +352,23 @@ def parse_args():
         help="Numerical stability epsilon for geodesic/slerp path when sin(theta) is tiny.",
     )
     parser.add_argument(
+        "--flow-step-norm-mode",
+        type=str,
+        choices=["auto", "on", "off"],
+        default="auto",
+        help=(
+            "Per-step normalization mode during flow integration. "
+            "'auto': disable for linear path, enable otherwise."
+        ),
+    )
+    parser.add_argument(
+        "--flow-step-norm-type",
+        type=str,
+        choices=["l2", "expmap"],
+        default="l2",
+        help="Per-step normalization update type when enabled: l2 projection or sphere exponential-map update.",
+    )
+    parser.add_argument(
         "--global-start-noise-std",
         type=float,
         default=0.0,
@@ -434,6 +451,12 @@ def parse_args():
     args = parser.parse_args()
     args.global_flow_use_cond_gate = not args.global_flow_disable_cond_gate
     args.global_flow_use_delta = not args.global_flow_disable_delta
+    if args.flow_step_norm_mode == "on":
+        args.flow_step_normalize = True
+    elif args.flow_step_norm_mode == "off":
+        args.flow_step_normalize = False
+    else:
+        args.flow_step_normalize = args.flow_path_type != "linear"
     args.aggregate = not args.skip_aggregate
 
     # If some params are not passed, we use the default values based on model name.
