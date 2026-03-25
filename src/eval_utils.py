@@ -277,7 +277,7 @@ def encode_text_from_token_features(
     x = pooled @ model.text_projection
     return x
 
-def flow_matching_inference(flow_net, q, e_m=None, num_steps=4, eps=1e-6):
+def flow_matching_inference(flow_net, q, e_m=None, num_steps=4, eps=1e-6, step_normalize=True):
     def l2norm(x):
         return x / x.norm(dim=-1, keepdim=True).clamp(min=eps)
 
@@ -301,7 +301,8 @@ def flow_matching_inference(flow_net, q, e_m=None, num_steps=4, eps=1e-6):
         v = flow_net(x_t, delta=delta, e_m=e_m, t=t)
         v = torch.tanh(v)
         x_t = x_t + dt * v
-        x_t = l2norm(x_t)
+        if step_normalize:
+            x_t = l2norm(x_t)
 
     return x_t
 
@@ -926,6 +927,7 @@ def evaluate_cirr_fm(model, img2text, args, query_loader, target_loader, flow_ne
                         q,
                         e_m,
                         num_steps=getattr(args, "flow_num_steps", 16),
+                        step_normalize=getattr(args, "flow_step_normalize", True),
                     )
 
                 flow_feature = flow_feature / flow_feature.norm(dim=-1, keepdim=True)
@@ -1387,7 +1389,8 @@ def evaluate_fashion_fm(model, img2text, args, source_loader, target_loader, flo
                         fm,
                         q,
                         e_m,
-                        num_steps=getattr(args, "flow_num_steps", 16)
+                        num_steps=getattr(args, "flow_num_steps", 16),
+                        step_normalize=getattr(args, "flow_step_normalize", True),
                     )
                 flow_feature = flow_feature / flow_feature.norm(dim=-1, keepdim=True)
                 all_flow_features.append(flow_feature)

@@ -29,6 +29,7 @@ class FlowMatchingLoss(nn.Module):
         eps=1e-6,
         path_type="linear",
         geodesic_eps=1e-4,
+        step_normalize=True,
     ):
         """
         A simplified and more stable flow matching loss.
@@ -56,6 +57,7 @@ class FlowMatchingLoss(nn.Module):
         self.eps = eps
         self.path_type = path_type
         self.geodesic_eps = geodesic_eps
+        self.step_normalize = step_normalize
 
     def _maybe_normalize_inputs(self, q, y, e_m=None):
         if self.normalize:
@@ -137,7 +139,7 @@ class FlowMatchingLoss(nn.Module):
             v = self._flow_net_call(x, q, e_m, t)
             x = x + dt * v
 
-            if self.normalize:
+            if self.step_normalize:
                 x = l2norm(x, eps=self.eps)
 
         return x
