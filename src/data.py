@@ -59,9 +59,9 @@ class CIRR(Dataset):
         if self.test:
             self.root_img = os.path.join(self.root, 'test1')
             if self.mode == 'caps':
-                self.json = os.path.join(self.root , 'captions/cap.VER.val.json')
+                self.json = os.path.join(self.root , 'captions/cap.VER.test.json')
             else:
-                self.json = os.path.join(self.root, 'image_splits/split.VER.val.json')
+                self.json = os.path.join(self.root, 'image_splits/split.VER.test.json')
         else:
             if self.mode == 'caps':
                 self.json = os.path.join(self.root, 'captions/cap.VER.val.json')
