@@ -4,7 +4,7 @@ set -euo pipefail
 # Usage example:
 #   bash eval_flow_cirr_fashioniq.sh
 # Optional env overrides:
-#   RESUME=/path/to/checkpoint.pt GPU_ID=0 CUDA_VISIBLE_DEVICES=0,1 bash eval_flow_cirr_fashioniq.sh
+#   RESUME=/path/to/checkpoint.pt GPU_ID=0 CUDA_VISIBLE_DEVICES=0,1 EVAL_CSV_PATH=./logs/my_eval.csv bash eval_flow_cirr_fashioniq.sh
 
 GPU_ID="${GPU_ID:-0}"
 CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-0,1}"
@@ -12,6 +12,7 @@ RESUME="${RESUME:-/home/sunyw/CIR/Pic2Word/logs/fm_composed_1e-4/checkpoints/epo
 MODEL_NAME="${MODEL_NAME:-ViT-L/14}"
 LOSS_TYPE="${LOSS_TYPE:-global}"
 EVAL_CIRR_TEST="${EVAL_CIRR_TEST:-0}"  # 1 => additionally run CIRR test split
+EVAL_CSV_PATH="${EVAL_CSV_PATH:-./logs/eval_flow_metrics.csv}"
 
 # Global flow config (kept aligned with existing fashioniq.sh defaults)
 flow_conditioning="${FLOW_CONDITIONING:-disabled}"
@@ -56,6 +57,7 @@ run_eval() {
     --gpu "${GPU_ID}"
     --loss-type "${LOSS_TYPE}"
     --model "${MODEL_NAME}"
+    --eval-csv "${EVAL_CSV_PATH}"
     "${extra_flow_args[@]}"
   )
 

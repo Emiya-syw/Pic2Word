@@ -22,9 +22,11 @@ warnings.filterwarnings(
 import os
 import time
 import logging
+import csv
 from time import gmtime, strftime
 from pathlib import Path
 import json
+from datetime import datetime, timezone
 
 import torch
 import torch.distributed as dist
@@ -69,6 +71,48 @@ def maybe_strip_module_prefix(state_dict):
     if first_key.startswith("module."):
         return {k[len("module."):]: v for k, v in state_dict.items()}
     return state_dict
+
+
+def append_eval_metrics_to_csv(args, dataset_name, source_name, metrics_by_feature):
+    csv_path = getattr(args, "eval_csv", None)
+    if not csv_path or not is_master(args) or not metrics_by_feature:
+        return
+
+    csv_file = Path(csv_path)
+    csv_file.parent.mkdir(parents=True, exist_ok=True)
+
+    file_exists = csv_file.exists()
+    rows = []
+    timestamp_utc = datetime.now(timezone.utc).isoformat()
+
+    for feature_name, metric_dict in metrics_by_feature.items():
+        for metric_name, metric_value in metric_dict.items():
+            rows.append({
+                "timestamp_utc": timestamp_utc,
+                "checkpoint": args.resume,
+                "dataset": dataset_name,
+                "source_data": source_name if source_name is not None else "",
+                "feature": feature_name,
+                "metric": metric_name,
+                "value": float(metric_value),
+            })
+
+    fieldnames = [
+        "timestamp_utc",
+        "checkpoint",
+        "dataset",
+        "source_data",
+        "feature",
+        "metric",
+        "value",
+    ]
+    with csv_file.open("a", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        if not file_exists:
+            writer.writeheader()
+        writer.writerows(rows)
+
+    logging.info(f"Saved {len(rows)} metric rows to CSV: {csv_file}")
 
 
 def setup_log_save(args):
@@ -386,7 +430,7 @@ def main_worker(gpu, ngpus_per_node, log_queue, args):
             pin_memory=True,
             drop_last=False,
         )
-        evaluate_cirr_fm(
+        cirr_metrics = evaluate_cirr_fm(
             model,
             img2text,
             args,
@@ -394,6 +438,7 @@ def main_worker(gpu, ngpus_per_node, log_queue, args):
             target_dataloader,
             flow_net=flow_net,
         )
+        append_eval_metrics_to_csv(args, dataset_name="cirr", source_name=None, metrics_by_feature=cirr_metrics)
 
     elif args.eval_mode == 'cirr_test':
         source_dataset = CIRR(transforms=preprocess_val, root=root_project, test=True)
@@ -454,7 +499,13 @@ def main_worker(gpu, ngpus_per_node, log_queue, args):
             pin_memory=True,
             drop_last=False,
         )
-        evaluate_fashion_fm(model, img2text, args, source_dataloader, target_dataloader, flow_net=flow_net)
+        fashion_metrics = evaluate_fashion_fm(model, img2text, args, source_dataloader, target_dataloader, flow_net=flow_net)
+        append_eval_metrics_to_csv(
+            args,
+            dataset_name="fashioniq",
+            source_name=args.source_data,
+            metrics_by_feature=fashion_metrics,
+        )
 
     elif args.eval_mode == 'imgnet':
         domains = ['cartoon', 'origami', 'toy', 'sculpture']

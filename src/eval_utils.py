@@ -957,13 +957,15 @@ def evaluate_cirr_fm(model, img2text, args, query_loader, target_loader, flow_ne
         if len(all_flow_features) > 0:
             feats["flow"] = torch.cat(all_flow_features)
 
+        metrics_by_feature = {}
         for key, value in feats.items():
             metrics = metric_func(ref_features=value)
+            metrics_by_feature[key] = metrics
             logging.info(
                 f"Eval {key} Feature" + "\t".join([f"{k}: {v:.4f}" for k, v in metrics.items()])
             )
 
-    return metrics
+    return metrics_by_feature
 
 
 def evaluate_cirr_test(model, img2text, args, query_loader, target_loader):
@@ -1412,11 +1414,13 @@ def evaluate_fashion_fm(model, img2text, args, source_loader, target_loader, flo
         if len(all_flow_features) > 0:
             feats['flow'] = torch.cat(all_flow_features)
 
+        metrics_by_feature = {}
         for key, value in feats.items():
             metrics = metric_func(ref_features=value)
+            metrics_by_feature[key] = metrics
             logging.info(
                 f"Eval {key} Feature\t" +
                 "\t".join([f"{k}: {v:.4f}" for k, v in metrics.items()])
             )
 
-    return metrics
+    return metrics_by_feature
