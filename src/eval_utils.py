@@ -866,7 +866,7 @@ def evaluate_cirr_fm(model, img2text, args, query_loader, target_loader, flow_ne
 
             if fm is not None:
                 if getattr(args, "loss_type", "global") == "sequence":
-                    src_tokens = extract_text_token_features(m, caption_only, end_layer=-1)
+                    src_tokens = extract_text_token_features(m, text_with_blank, end_layer=-1)
                     vis_tokens = extract_image_token_features(m, ref_images, end_layer=-1)
 
                     if getattr(args, "seq_flow_drop_visual_cls", False):
@@ -880,12 +880,12 @@ def evaluate_cirr_fm(model, img2text, args, query_loader, target_loader, flow_ne
                         fm,
                         src_tokens=src_tokens,
                         vis_tokens=vis_tokens,
-                        src_mask=build_text_mask(caption_only),
+                        src_mask=build_text_mask(text_with_blank),
                         num_steps=getattr(args, "flow_num_steps", 16),
                     )
                     flow_feature = encode_text_from_token_features(
                         m,
-                        caption_only,
+                        text_with_blank,
                         flow_tokens,
                         start_layer=-1,
                         pooling=getattr(args, "seq_flow_pooling", "eot"),
@@ -897,7 +897,7 @@ def evaluate_cirr_fm(model, img2text, args, query_loader, target_loader, flow_ne
                         model=m,
                         img2text=it,
                         ref_images=ref_images,
-                        texts=caption_only,
+                        texts=text_with_blank,
                         args=args,
                         source=getattr(args, "global_flow_start_source", "text"),
                         text_weight=getattr(args, "global_flow_start_text_weight", 1.0),

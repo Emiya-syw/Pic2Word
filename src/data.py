@@ -44,8 +44,8 @@ from third_party.open_clip.clip import tokenize
 ## Structure of dataset directory
 ## CIRR: under ./data/CIRR
 ## validation images ./dev/
-## caption split ./captions/cap.rc2.val.json
-## image split ./image_splits/split.rc2.val.json
+## caption split ./captions/cap.VER.val.json
+## image split ./image_splits/split.VER.val.json
 class CIRR(Dataset):
     def __init__(self, transforms, mode='caps', 
     vis_mode=False, test=False, root='./data'):
@@ -55,18 +55,18 @@ class CIRR(Dataset):
         ## mode to use test split of CIRR
         self.test = test
         self.root = os.path.join(root, 'CIRR')
-        self.root_img = os.path.join(self.root, 'dev')
+        self.root_img = os.path.join(self.root, 'image_raw', 'dev')
         if self.test:
             self.root_img = os.path.join(self.root, 'test1')
             if self.mode == 'caps':
-                self.json = os.path.join(self.root , 'captions/cap.rc2.test1.json')
+                self.json = os.path.join(self.root , 'captions/cap.VER.val.json')
             else:
-                self.json = os.path.join(self.root, 'image_splits/split.rc2.test1.json')
+                self.json = os.path.join(self.root, 'image_splits/split.VER.val.json')
         else:
             if self.mode == 'caps':
-                self.json = os.path.join(self.root, 'captions/cap.rc2.val.json')
+                self.json = os.path.join(self.root, 'captions/cap.VER.val.json')
             else:
-                self.json = os.path.join(self.root, 'image_splits/split.rc2.val.json')
+                self.json = os.path.join(self.root, 'image_splits/split.VER.val.json')
         logging.debug(f'Loading json data from {self.json}.')
         data = json.load(open(self.json, "r"))                                
         self.ref_imgs = []
@@ -341,7 +341,7 @@ class FashionIQ_FM(Dataset):
         return len(self.ref_imgs)
 
     def build_modification_text(self, cap1, cap2):
-        return f"a photo of * that is {cap1} and {cap2}"
+        return f"a photo of * , {cap1} and {cap2}"
 
     def build_target_text(self, target_cap):
         return f"a photo of {target_cap}"
@@ -1051,4 +1051,4 @@ def get_data(args, preprocess_fns):
         data["imagenet-val"] = get_imagenet(args, preprocess_fns, "val")
     if args.imagenet_v2 is not None:
         data["imagenet-v2"] = get_imagenet(args, preprocess_fns, "v2")
-    return
+    return data

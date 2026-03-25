@@ -245,7 +245,7 @@ def build_global_flow_feature(model, img2text, ref_images, texts, args, source, 
     if source == "text":
         feature = encode_text_batch(model, texts, args)
     elif source == "image":
-        feature = encode_image_via_img2text(model, img2text, ref_images, args)
+        feature = encode_image_batch(model, ref_images, args)
     elif source == "composed":
         compose_method = getattr(args, "global_flow_compose_method", "add").lower()
         if compose_method == "pic2word":

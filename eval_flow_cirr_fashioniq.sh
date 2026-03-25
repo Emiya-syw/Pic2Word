@@ -8,7 +8,7 @@ set -euo pipefail
 
 GPU_ID="${GPU_ID:-0}"
 CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-0,1}"
-RESUME="${RESUME:-/home/sunyw/CIR/Pic2Word/logs/fm_composed_dress/checkpoints/epoch_1.pt}"
+RESUME="${RESUME:-/home/sunyw/CIR/Pic2Word/logs/fm_composed_1e-4/checkpoints/epoch_12.pt}"
 MODEL_NAME="${MODEL_NAME:-ViT-L/14}"
 LOSS_TYPE="${LOSS_TYPE:-global}"
 EVAL_CIRR_TEST="${EVAL_CIRR_TEST:-0}"  # 1 => additionally run CIRR test split
@@ -70,9 +70,9 @@ run_eval() {
 run_eval "cirr"
 
 # Optional: CIRR test split (will write jsons under res_cirr/)
-if [[ "${EVAL_CIRR_TEST}" == "1" ]]; then
-  run_eval "cirr_test"
-fi
+# if [[ "${EVAL_CIRR_TEST}" == "1" ]]; then
+#   run_eval "cirr_test"
+# fi
 
 # 2) FashionIQ categories
 for cloth_type in shirt dress toptee; do
