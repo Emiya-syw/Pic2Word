@@ -136,7 +136,10 @@ class CIRR(Dataset):
             tar_path = str(self.target_imgs[idx])
             img_path = os.path.join(self.root_img, tar_path)
             target_images = self.transforms(Image.open(img_path))
-            return target_images, img_path
+            # Keep image identifiers consistent with caption entries (e.g. "xxx.png").
+            # Returning absolute paths here breaks CIRR metric filtering logic that
+            # compares index names against reference names.
+            return target_images, tar_path
 
     def __getitem__(self, idx):
         if self.test:                        
