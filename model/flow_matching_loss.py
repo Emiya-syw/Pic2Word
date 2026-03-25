@@ -61,23 +61,16 @@ class FlowMatchingLoss(nn.Module):
                 e_m = l2norm(e_m, eps=self.eps)
         return q, y, e_m
 
-    def _alpha(self, t):
-        return t.pow(self.gamma)
-
     def _path_target(self, q, y, t):
         """
-        Normalized lerp path:
-            x_t = normalize((1-alpha) q + alpha y)
+        Non-normalized straight-line path:
+            x_t = (1 - t) q + t y
 
-        State-dependent target:
-            u_star = y - x_t
+        Constant target velocity:
+            u_star = y - q
         """
-        alpha = self._alpha(t)
-        x_t = (1.0 - alpha) * q + alpha * y
-        if self.normalize:
-            x_t = l2norm(x_t, eps=self.eps)
-
-        u_star = y - x_t
+        x_t = (1.0 - t) * q + t * y
+        u_star = y - q
         return x_t, u_star
 
     def _flow_net_call(self, x, q0, e_m, t):
