@@ -58,6 +58,7 @@ run_eval() {
     --loss-type "${LOSS_TYPE}"
     --model "${MODEL_NAME}"
     --eval-csv "${EVAL_CSV_PATH}"
+    --flow-num-steps 8
     "${extra_flow_args[@]}"
   )
 

@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-exp_name="fm_composed_dress_5e-4"
+exp_name="fm_composed_geo"
 gpu_id=0
 train_gpus="0,1,2,3,4,5,6,7"
 
@@ -29,10 +29,10 @@ flow_start_text_weight="1.0"
 flow_start_image_weight="1.0"
 flow_condition_text_weight="1.0"
 flow_condition_image_weight="1.0"
-flow_path_type="linear"   # linear | geodesic
+flow_path_type="geodesic"   # linear | geodesic
 flow_geodesic_eps="1e-4"
 flow_step_norm_mode="auto" # auto: linear->off, geodesic->on
-flow_step_norm_type="l2"   # l2 | expmap
+flow_step_norm_type="expmap"   # l2 | expmap
 global_start_noise_std="0.0"
 disable_delta=0
 disable_cond_gate=0
@@ -65,7 +65,7 @@ fi
 # 仅新增：validation dataset 设置（配合 main_fm.py 每10 epoch自动跑 val loss）
 train_data_path="composed_image_retrieval/train.sh"
 val_data_path="composed_image_retrieval/val.sh"
-train_dataset_type="flow_matching"
+train_dataset_type="cc3m"
 val_dataset_type="fashion-iq"
 target_epoch=20
 
@@ -87,7 +87,7 @@ CUDA_VISIBLE_DEVICES=${train_gpus} python -u src/main_fm.py \
     --dataset-type-val "${val_dataset_type}" \
     --warmup 500 \
     --batch-size 256 \
-    --lr 5e-5 \
+    --lr 1e-4 \
     --wd 0.1 \
     --epochs ${target_epoch} \
     --workers 8 \

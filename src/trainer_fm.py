@@ -382,6 +382,7 @@ def validate(model, img2text, flow_net, criterion, data, epoch, args, writer=Non
                 step_norm_type=getattr(args, "flow_step_norm_type", "l2"),
             )
 
+            val_query_features = _normalize_feature(val_query_features)
             all_query_features.append(val_query_features.detach().cpu())
             all_target_features.append(val_target_features.detach().cpu())
 
