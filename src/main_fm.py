@@ -298,6 +298,8 @@ def main_worker(gpu, ngpus_per_node, log_queue, args):
         lambda_ret=args.lambda_ret,
         # lambda_mid=args.lambda_mid,
         temperature=args.flow_temperature,
+        path_type=args.flow_path_type,
+        geodesic_eps=args.flow_geodesic_eps,
         normalize=True,
     ).to(device)
 
@@ -573,6 +575,10 @@ def main():
         args.flow_num_steps = 4
     if not hasattr(args, "flow_temperature"):
         args.flow_temperature = 0.07
+    if not hasattr(args, "flow_path_type"):
+        args.flow_path_type = "linear"
+    if not hasattr(args, "flow_geodesic_eps"):
+        args.flow_geodesic_eps = 1e-4
     if not hasattr(args, "lambda_fm"):
         args.lambda_fm = 1.0
     if not hasattr(args, "lambda_end"):
@@ -595,6 +601,7 @@ def main():
             f"flow={args.loss_type}_"
             f"flowhd={args.flow_hidden_dim}_"
             f"steps={args.flow_num_steps}_"
+            f"path={args.flow_path_type}_"
             f"gnoise={args.global_start_noise_std}"
         )
         if args.time_suffix:

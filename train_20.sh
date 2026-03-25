@@ -29,6 +29,8 @@ flow_start_text_weight="1.0"
 flow_start_image_weight="1.0"
 flow_condition_text_weight="1.0"
 flow_condition_image_weight="1.0"
+flow_path_type="linear"   # linear | geodesic
+flow_geodesic_eps="1e-4"
 global_start_noise_std="0.0"
 disable_delta=0
 disable_cond_gate=0
@@ -43,6 +45,8 @@ extra_flow_args=(
     --global-flow-start-image-weight "${flow_start_image_weight}"
     --global-flow-condition-text-weight "${flow_condition_text_weight}"
     --global-flow-condition-image-weight "${flow_condition_image_weight}"
+    --flow-path-type "${flow_path_type}"
+    --flow-geodesic-eps "${flow_geodesic_eps}"
     --global-start-noise-std "${global_start_noise_std}"
 )
 
@@ -67,6 +71,7 @@ echo "Resume from: ${resume_path}"
 echo "Flow conditioning: ${flow_conditioning}"
 echo "Flow start source: ${flow_start_source}"
 echo "Flow compose method: ${flow_compose_method}"
+echo "Flow path type: ${flow_path_type}"
 echo "Val data: ${val_data_path} (${val_dataset_type})"
 echo "=========================================="
 

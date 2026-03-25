@@ -339,6 +339,19 @@ def parse_args():
         help="Temperature used by the global retrieval loss.",
     )
     parser.add_argument(
+        "--flow-path-type",
+        type=str,
+        choices=["linear", "geodesic"],
+        default="linear",
+        help="Path used to build FM targets: Euclidean linear path or sphere geodesic (slerp).",
+    )
+    parser.add_argument(
+        "--flow-geodesic-eps",
+        type=float,
+        default=1e-4,
+        help="Numerical stability epsilon for geodesic/slerp path when sin(theta) is tiny.",
+    )
+    parser.add_argument(
         "--global-start-noise-std",
         type=float,
         default=0.0,
