@@ -96,6 +96,12 @@ def parse_args():
         choices=["coco", "cirr", "cirr_test", "fashion", "imgnet"],
         default="coco",
         help="Evaluate Pacs")
+    parser.add_argument(
+        "--eval-csv",
+        type=str,
+        default=None,
+        help="Optional path to append retrieval evaluation metrics as CSV.",
+    )
     parser.add_argument("--middle_dim",
         default=512,
         type=int,
