@@ -798,6 +798,174 @@ def evaluate_cirr(model, img2text, args, query_loader, target_loader):
     return metrics
 
 
+def evaluate_cirr_fm(model, img2text, args, query_loader, target_loader, flow_net=None):
+    """
+    CIRR evaluation with optional flow-matching feature branch.
+    Keeps legacy baselines (composed/image/text/mixture) and adds `flow` when flow_net is provided.
+    """
+    if not is_master(args):
+        return
+
+    model.eval()
+    img2text.eval()
+    if flow_net is not None:
+        flow_net.eval()
+
+    all_image_features = []
+    all_query_image_features = []
+    all_composed_features = []
+    all_flow_features = []
+    all_mixture_features = []
+    all_caption_features = []
+    all_ref_paths = []
+    all_target_paths = []
+    all_answer_paths = []
+
+    m = unwrap_model(model)
+    it = unwrap_model(img2text)
+    fm = unwrap_model(flow_net) if flow_net is not None else None
+
+    with torch.no_grad():
+        for batch in tqdm(target_loader):
+            target_images, target_paths = batch
+            if args.gpu is not None:
+                target_images = target_images.cuda(args.gpu, non_blocking=True)
+            image_features = m.encode_image(target_images)
+            image_features = image_features / image_features.norm(dim=-1, keepdim=True)
+            all_image_features.append(image_features)
+            for path in target_paths:
+                all_target_paths.append(path)
+
+        for batch in tqdm(query_loader):
+            ref_images, text_with_blank, caption_only, ref_paths, answer_paths, _ = batch
+            if args.gpu is not None:
+                ref_images = ref_images.cuda(args.gpu, non_blocking=True)
+                text_with_blank = text_with_blank.cuda(args.gpu, non_blocking=True)
+                caption_only = caption_only.cuda(args.gpu, non_blocking=True)
+
+            id_split = tokenize(["*"])[0][1]
+            for path in ref_paths:
+                all_ref_paths.append(path)
+            for path in answer_paths:
+                all_answer_paths.append(path)
+
+            caption_features = m.encode_text(caption_only)
+            caption_features = caption_features / caption_features.norm(dim=-1, keepdim=True)
+
+            query_image_features = m.encode_image(ref_images)
+            query_image_features = query_image_features / query_image_features.norm(dim=-1, keepdim=True)
+
+            query_image_tokens = it(query_image_features)
+            composed_feature = m.encode_text_img_retrieval(
+                text_with_blank, query_image_tokens, split_ind=id_split, repeat=False
+            )
+            composed_feature = composed_feature / composed_feature.norm(dim=-1, keepdim=True)
+
+            mixture_features = query_image_features + caption_features
+            mixture_features = mixture_features / mixture_features.norm(dim=-1, keepdim=True)
+
+            if fm is not None:
+                if getattr(args, "loss_type", "global") == "sequence":
+                    src_tokens = extract_text_token_features(m, caption_only, end_layer=-1)
+                    vis_tokens = extract_image_token_features(m, ref_images, end_layer=-1)
+
+                    if getattr(args, "seq_flow_drop_visual_cls", False):
+                        vis_tokens = vis_tokens[:, 1:, :]
+
+                    if getattr(args, "seq_flow_token_norm", False):
+                        src_tokens = F.normalize(src_tokens, dim=-1)
+                        vis_tokens = F.normalize(vis_tokens, dim=-1)
+
+                    flow_tokens = sequence_flow_matching_inference(
+                        fm,
+                        src_tokens=src_tokens,
+                        vis_tokens=vis_tokens,
+                        src_mask=build_text_mask(caption_only),
+                        num_steps=getattr(args, "flow_num_steps", 16),
+                    )
+                    flow_feature = encode_text_from_token_features(
+                        m,
+                        caption_only,
+                        flow_tokens,
+                        start_layer=-1,
+                        pooling=getattr(args, "seq_flow_pooling", "eot"),
+                        ref_token_features=src_tokens,
+                        pooling_k=getattr(args, "seq_flow_pooling_k", 3),
+                    )
+                else:
+                    q = build_global_flow_feature(
+                        model=m,
+                        img2text=it,
+                        ref_images=ref_images,
+                        texts=caption_only,
+                        args=args,
+                        source=getattr(args, "global_flow_start_source", "text"),
+                        text_weight=getattr(args, "global_flow_start_text_weight", 1.0),
+                        image_weight=getattr(args, "global_flow_start_image_weight", 1.0),
+                    )
+                    use_condition = getattr(args, "global_flow_conditioning", "enabled") == "enabled"
+                    e_m = None
+                    if use_condition:
+                        e_m = build_global_flow_feature(
+                            model=m,
+                            img2text=it,
+                            ref_images=ref_images,
+                            texts=caption_only,
+                            args=args,
+                            source=getattr(args, "global_flow_condition_source", "image"),
+                            text_weight=getattr(args, "global_flow_condition_text_weight", 1.0),
+                            image_weight=getattr(args, "global_flow_condition_image_weight", 1.0),
+                        )
+                    q = apply_global_start_noise(q, args)
+                    q = _normalize_feature(q)
+                    if e_m is not None:
+                        e_m = _normalize_feature(e_m)
+
+                    flow_feature = flow_matching_inference(
+                        fm,
+                        q,
+                        e_m,
+                        num_steps=getattr(args, "flow_num_steps", 16),
+                    )
+
+                flow_feature = flow_feature / flow_feature.norm(dim=-1, keepdim=True)
+                all_flow_features.append(flow_feature)
+
+            all_caption_features.append(caption_features)
+            all_query_image_features.append(query_image_features)
+            all_composed_features.append(composed_feature)
+            all_mixture_features.append(mixture_features)
+
+        all_target_paths = np.array(all_target_paths)
+        all_ref_paths = np.array(all_ref_paths)
+        all_answer_paths = np.array(all_answer_paths)
+
+        metric_func = partial(
+            get_metrics_cirr,
+            image_features=torch.cat(all_image_features),
+            reference_names=all_ref_paths,
+            index_names=all_target_paths,
+            target_names=all_answer_paths,
+        )
+
+        feats = {
+            "composed": torch.cat(all_composed_features),
+            "image": torch.cat(all_query_image_features),
+            "text": torch.cat(all_caption_features),
+            "mixture": torch.cat(all_mixture_features),
+        }
+        if len(all_flow_features) > 0:
+            feats["flow"] = torch.cat(all_flow_features)
+
+        for key, value in feats.items():
+            metrics = metric_func(ref_features=value)
+            logging.info(
+                f"Eval {key} Feature" + "\t".join([f"{k}: {v:.4f}" for k, v in metrics.items()])
+            )
+
+    return metrics
+
+
 def evaluate_cirr_test(model, img2text, args, query_loader, target_loader):
     if not is_master(args):
         return

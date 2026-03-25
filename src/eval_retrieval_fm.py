@@ -47,6 +47,7 @@ from eval_utils import (
     evaluate_coco,
     evaluate_fashion,
     evaluate_cirr,
+    evaluate_cirr_fm,
     evaluate_cirr_test,
     evaluate_fashion_fm,
 )
@@ -385,7 +386,14 @@ def main_worker(gpu, ngpus_per_node, log_queue, args):
             pin_memory=True,
             drop_last=False,
         )
-        evaluate_cirr(model, img2text, args, source_dataloader, target_dataloader)
+        evaluate_cirr_fm(
+            model,
+            img2text,
+            args,
+            source_dataloader,
+            target_dataloader,
+            flow_net=flow_net,
+        )
 
     elif args.eval_mode == 'cirr_test':
         source_dataset = CIRR(transforms=preprocess_val, root=root_project, test=True)
