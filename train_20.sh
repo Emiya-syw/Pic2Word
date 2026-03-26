@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-exp_name="fm_composed_geo_l2_step16_nodelta_100k"
+exp_name="fm_composed_linenar_l2_step16_nodelta_100k"
 gpu_id=0
 train_gpus="0,1,2,3,4,5,6,7"
 
@@ -29,7 +29,7 @@ flow_start_text_weight="1.0"
 flow_start_image_weight="1.0"
 flow_condition_text_weight="1.0"
 flow_condition_image_weight="1.0"
-flow_path_type="geodesic"   # linear | geodesic
+flow_path_type="linear"   # linear | geodesic
 flow_geodesic_eps="1e-4"
 flow_step_norm_mode="on" # auto: linear->off, geodesic->on
 flow_step_norm_type="l2"   # l2 | expmap
