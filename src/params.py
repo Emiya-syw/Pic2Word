@@ -369,6 +369,15 @@ def parse_args():
         help="Per-step normalization update type when enabled: l2 projection or sphere exponential-map update.",
     )
     parser.add_argument(
+        "--flow-hybrid-geodesic-steps",
+        type=int,
+        default=0,
+        help=(
+            "Optional hybrid integration: first s steps use sphere/geodesic updates, "
+            "remaining steps use linear updates. Set s=0 to disable."
+        ),
+    )
+    parser.add_argument(
         "--global-start-noise-std",
         type=float,
         default=0.0,
@@ -457,6 +466,7 @@ def parse_args():
         args.flow_step_normalize = False
     else:
         args.flow_step_normalize = args.flow_path_type != "linear"
+    args.flow_hybrid_geodesic_steps = max(0, int(args.flow_hybrid_geodesic_steps))
     args.aggregate = not args.skip_aggregate
 
     # If some params are not passed, we use the default values based on model name.

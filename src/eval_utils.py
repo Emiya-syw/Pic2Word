@@ -285,6 +285,7 @@ def flow_matching_inference(
     eps=1e-6,
     step_normalize=True,
     step_norm_type="l2",
+    hybrid_geodesic_steps=0,
 ):
     def l2norm(x):
         return x / x.norm(dim=-1, keepdim=True).clamp(min=eps)
@@ -306,6 +307,7 @@ def flow_matching_inference(
     x0 = q.clone()
     B = q.size(0)
     dt = 1.0 / num_steps
+    hybrid_geodesic_steps = max(0, min(int(hybrid_geodesic_steps), int(num_steps)))
 
     for k in range(num_steps):
         t = torch.full(
@@ -317,13 +319,22 @@ def flow_matching_inference(
         delta = x_t - x0
         v = flow_net(x_t, delta=delta, e_m=e_m, t=t)
         v = torch.tanh(v)
-        if step_normalize:
-            if step_norm_type == "expmap":
-                x_t = sphere_expmap_step(x_t, v, dt=dt)
+        if hybrid_geodesic_steps > 0:
+            if k < hybrid_geodesic_steps:
+                if step_norm_type == "expmap":
+                    x_t = sphere_expmap_step(x_t, v, dt=dt)
+                else:
+                    x_t = l2norm(x_t + dt * v)
             else:
-                x_t = l2norm(x_t + dt * v)
+                x_t = x_t + dt * v
         else:
-            x_t = x_t + dt * v
+            if step_normalize:
+                if step_norm_type == "expmap":
+                    x_t = sphere_expmap_step(x_t, v, dt=dt)
+                else:
+                    x_t = l2norm(x_t + dt * v)
+            else:
+                x_t = x_t + dt * v
 
     return x_t
 
@@ -950,6 +961,7 @@ def evaluate_cirr_fm(model, img2text, args, query_loader, target_loader, flow_ne
                         num_steps=getattr(args, "flow_num_steps", 16),
                         step_normalize=getattr(args, "flow_step_normalize", True),
                         step_norm_type=getattr(args, "flow_step_norm_type", "l2"),
+                        hybrid_geodesic_steps=getattr(args, "flow_hybrid_geodesic_steps", 0),
                     )
 
                 flow_feature = flow_feature / flow_feature.norm(dim=-1, keepdim=True)
@@ -1414,6 +1426,7 @@ def evaluate_fashion_fm(model, img2text, args, source_loader, target_loader, flo
                         num_steps=getattr(args, "flow_num_steps", 16),
                         step_normalize=getattr(args, "flow_step_normalize", True),
                         step_norm_type=getattr(args, "flow_step_norm_type", "l2"),
+                        hybrid_geodesic_steps=getattr(args, "flow_hybrid_geodesic_steps", 0),
                     )
                 flow_feature = flow_feature / flow_feature.norm(dim=-1, keepdim=True)
                 all_flow_features.append(flow_feature)

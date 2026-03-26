@@ -46,6 +46,7 @@ class FlowMatchingLoss(nn.Module):
         geodesic_eps=1e-4,
         step_normalize=True,
         step_norm_type="l2",
+        hybrid_geodesic_steps=0,
     ):
         """
         A simplified and more stable flow matching loss.
@@ -75,6 +76,7 @@ class FlowMatchingLoss(nn.Module):
         self.geodesic_eps = geodesic_eps
         self.step_normalize = step_normalize
         self.step_norm_type = step_norm_type
+        self.hybrid_geodesic_steps = max(0, int(hybrid_geodesic_steps))
 
     def _maybe_normalize_inputs(self, q, y, e_m=None):
         if self.normalize:
@@ -120,11 +122,40 @@ class FlowMatchingLoss(nn.Module):
         return x_t, u_star
 
     def _path_target(self, q, y, t):
+        if self.hybrid_geodesic_steps > 0 and self.num_steps > 0:
+            return self._hybrid_path_target(q, y, t)
         if self.path_type == "linear":
             return self._linear_path_target(q, y, t)
         if self.path_type == "geodesic":
             return self._geodesic_path_target(q, y, t)
         raise ValueError(f"Unsupported path_type: {self.path_type}")
+
+    def _hybrid_path_target(self, q, y, t):
+        """
+        Piecewise target path for hybrid mode:
+          - first tau=s/N: geodesic target
+          - last 1-tau   : linear target towards y
+        """
+        tau = float(self.hybrid_geodesic_steps) / float(self.num_steps)
+        if tau <= 0.0:
+            return self._linear_path_target(q, y, t)
+        if tau >= 1.0:
+            return self._geodesic_path_target(q, y, t)
+
+        x_geo_t, u_geo_t = self._geodesic_path_target(q, y, t)
+        tau_tensor = torch.full_like(t, tau)
+        x_tau, _ = self._geodesic_path_target(q, y, tau_tensor)
+
+        remain = max(1.0 - tau, self.eps)
+        alpha = (t - tau_tensor) / remain
+        alpha = alpha.clamp(0.0, 1.0)
+        x_lin_t = (1.0 - alpha) * x_tau + alpha * y
+        u_lin_t = (y - x_tau) / remain
+
+        late_mask = t >= tau_tensor
+        x_t = torch.where(late_mask, x_lin_t, x_geo_t)
+        u_star = torch.where(late_mask, u_lin_t, u_geo_t)
+        return x_t, u_star
 
     def _flow_net_call(self, x, q0, e_m, t):
         """
@@ -144,6 +175,7 @@ class FlowMatchingLoss(nn.Module):
         B = q.size(0)
         device = q.device
         dt = 1.0 / self.num_steps
+        hybrid_geodesic_steps = max(0, min(self.hybrid_geodesic_steps, int(self.num_steps)))
 
         for k in range(self.num_steps):
             t = torch.full(
@@ -154,13 +186,22 @@ class FlowMatchingLoss(nn.Module):
             )
 
             v = self._flow_net_call(x, q, e_m, t)
-            if self.step_normalize:
-                if self.step_norm_type == "expmap":
-                    x = sphere_expmap_step(x, v, dt=dt, eps=self.eps)
+            if hybrid_geodesic_steps > 0:
+                if k < hybrid_geodesic_steps:
+                    if self.step_norm_type == "expmap":
+                        x = sphere_expmap_step(x, v, dt=dt, eps=self.eps)
+                    else:
+                        x = l2norm(x + dt * v, eps=self.eps)
                 else:
-                    x = l2norm(x + dt * v, eps=self.eps)
+                    x = x + dt * v
             else:
-                x = x + dt * v
+                if self.step_normalize:
+                    if self.step_norm_type == "expmap":
+                        x = sphere_expmap_step(x, v, dt=dt, eps=self.eps)
+                    else:
+                        x = l2norm(x + dt * v, eps=self.eps)
+                else:
+                    x = x + dt * v
 
         return x
 
@@ -214,5 +255,3 @@ class FlowMatchingLoss(nn.Module):
             "loss_ret": loss_ret,
             "y_hat": y_hat,
         }
-
-

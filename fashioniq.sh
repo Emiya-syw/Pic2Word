@@ -12,6 +12,7 @@ flow_condition_image_weight="1.0"
 global_start_noise_std="0.0"
 flow_step_norm_mode="auto" # auto: linear->off, geodesic->on
 flow_step_norm_type="l2"   # l2 | expmap
+flow_hybrid_geodesic_steps="0" # 0=off; >0 => first s steps geodesic, remaining linear
 disable_delta=0
 disable_cond_gate=0
 
@@ -27,6 +28,7 @@ extra_flow_args=(
     --global-flow-condition-image-weight "${flow_condition_image_weight}"
     --flow-step-norm-mode "${flow_step_norm_mode}"
     --flow-step-norm-type "${flow_step_norm_type}"
+    --flow-hybrid-geodesic-steps "${flow_hybrid_geodesic_steps}"
     --global-start-noise-std "${global_start_noise_std}"
 )
 
