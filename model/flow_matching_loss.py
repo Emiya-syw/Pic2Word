@@ -46,6 +46,7 @@ class FlowMatchingLoss(nn.Module):
         geodesic_eps=1e-4,
         step_normalize=True,
         step_norm_type="l2",
+        hybrid_geodesic_steps=0,
     ):
         """
         A simplified and more stable flow matching loss.
@@ -75,6 +76,7 @@ class FlowMatchingLoss(nn.Module):
         self.geodesic_eps = geodesic_eps
         self.step_normalize = step_normalize
         self.step_norm_type = step_norm_type
+        self.hybrid_geodesic_steps = max(0, int(hybrid_geodesic_steps))
 
     def _maybe_normalize_inputs(self, q, y, e_m=None):
         if self.normalize:
@@ -144,6 +146,7 @@ class FlowMatchingLoss(nn.Module):
         B = q.size(0)
         device = q.device
         dt = 1.0 / self.num_steps
+        hybrid_geodesic_steps = max(0, min(self.hybrid_geodesic_steps, int(self.num_steps)))
 
         for k in range(self.num_steps):
             t = torch.full(
@@ -154,13 +157,22 @@ class FlowMatchingLoss(nn.Module):
             )
 
             v = self._flow_net_call(x, q, e_m, t)
-            if self.step_normalize:
-                if self.step_norm_type == "expmap":
-                    x = sphere_expmap_step(x, v, dt=dt, eps=self.eps)
+            if hybrid_geodesic_steps > 0:
+                if k < hybrid_geodesic_steps:
+                    if self.step_norm_type == "expmap":
+                        x = sphere_expmap_step(x, v, dt=dt, eps=self.eps)
+                    else:
+                        x = l2norm(x + dt * v, eps=self.eps)
                 else:
-                    x = l2norm(x + dt * v, eps=self.eps)
+                    x = x + dt * v
             else:
-                x = x + dt * v
+                if self.step_normalize:
+                    if self.step_norm_type == "expmap":
+                        x = sphere_expmap_step(x, v, dt=dt, eps=self.eps)
+                    else:
+                        x = l2norm(x + dt * v, eps=self.eps)
+                else:
+                    x = x + dt * v
 
         return x
 
@@ -214,5 +226,4 @@ class FlowMatchingLoss(nn.Module):
             "loss_ret": loss_ret,
             "y_hat": y_hat,
         }
-
 

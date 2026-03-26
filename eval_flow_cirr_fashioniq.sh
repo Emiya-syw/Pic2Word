@@ -25,6 +25,7 @@ flow_start_image_weight="${FLOW_START_IMAGE_WEIGHT:-1.0}"
 flow_condition_text_weight="${FLOW_CONDITION_TEXT_WEIGHT:-1.0}"
 flow_condition_image_weight="${FLOW_CONDITION_IMAGE_WEIGHT:-1.0}"
 global_start_noise_std="${GLOBAL_START_NOISE_STD:-0.0}"
+flow_hybrid_geodesic_steps="${FLOW_HYBRID_GEODESIC_STEPS:-0}"
 
 extra_flow_args=(
   --global-flow-conditioning "${flow_conditioning}"
@@ -37,6 +38,7 @@ extra_flow_args=(
   --global-flow-condition-text-weight "${flow_condition_text_weight}"
   --global-flow-condition-image-weight "${flow_condition_image_weight}"
   --global-start-noise-std "${global_start_noise_std}"
+  --flow-hybrid-geodesic-steps "${flow_hybrid_geodesic_steps}"
 )
 
 run_eval() {

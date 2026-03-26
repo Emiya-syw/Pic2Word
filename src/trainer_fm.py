@@ -198,7 +198,15 @@ def build_global_flow_feature(model, img2text, ref_images, texts, args, source, 
     return _normalize_feature(feature)
 
 
-def flow_matching_inference(flow_net, q, e_m=None, num_steps=4, step_normalize=True, step_norm_type="l2"):
+def flow_matching_inference(
+    flow_net,
+    q,
+    e_m=None,
+    num_steps=4,
+    step_normalize=True,
+    step_norm_type="l2",
+    hybrid_geodesic_steps=0,
+):
     q = _normalize_feature(q)
     if e_m is not None:
         e_m = _normalize_feature(e_m)
@@ -207,6 +215,7 @@ def flow_matching_inference(flow_net, q, e_m=None, num_steps=4, step_normalize=T
     x0 = q.clone()
     batch_size = q.size(0)
     dt = 1.0 / num_steps
+    hybrid_geodesic_steps = max(0, min(int(hybrid_geodesic_steps), int(num_steps)))
 
     for k in range(num_steps):
         t = torch.full(
@@ -218,13 +227,22 @@ def flow_matching_inference(flow_net, q, e_m=None, num_steps=4, step_normalize=T
         delta = x_t - x0
         velocity = flow_net(x_t, delta=delta, e_m=e_m, t=t)
         velocity = torch.tanh(velocity)
-        if step_normalize:
-            if step_norm_type == "expmap":
-                x_t = _sphere_expmap_step(x_t, velocity, dt=dt)
+        if hybrid_geodesic_steps > 0:
+            if k < hybrid_geodesic_steps:
+                if step_norm_type == "expmap":
+                    x_t = _sphere_expmap_step(x_t, velocity, dt=dt)
+                else:
+                    x_t = _normalize_feature(x_t + dt * velocity)
             else:
-                x_t = _normalize_feature(x_t + dt * velocity)
+                x_t = x_t + dt * velocity
         else:
-            x_t = x_t + dt * velocity
+            if step_normalize:
+                if step_norm_type == "expmap":
+                    x_t = _sphere_expmap_step(x_t, velocity, dt=dt)
+                else:
+                    x_t = _normalize_feature(x_t + dt * velocity)
+            else:
+                x_t = x_t + dt * velocity
 
     return x_t
 
@@ -380,6 +398,7 @@ def validate(model, img2text, flow_net, criterion, data, epoch, args, writer=Non
                 num_steps=getattr(args, "flow_num_steps", 16),
                 step_normalize=getattr(args, "flow_step_normalize", True),
                 step_norm_type=getattr(args, "flow_step_norm_type", "l2"),
+                hybrid_geodesic_steps=getattr(args, "flow_hybrid_geodesic_steps", 0),
             )
 
             val_query_features = _normalize_feature(val_query_features)

@@ -33,6 +33,7 @@ flow_path_type="linear"   # linear | geodesic
 flow_geodesic_eps="1e-4"
 flow_step_norm_mode="on" # auto: linear->off, geodesic->on
 flow_step_norm_type="l2"   # l2 | expmap
+flow_hybrid_geodesic_steps="0" # 0=off; >0 => first s steps geodesic, remaining linear
 global_start_noise_std="0.0"
 disable_delta=1
 disable_cond_gate=0
@@ -51,6 +52,7 @@ extra_flow_args=(
     --flow-geodesic-eps "${flow_geodesic_eps}"
     --flow-step-norm-mode "${flow_step_norm_mode}"
     --flow-step-norm-type "${flow_step_norm_type}"
+    --flow-hybrid-geodesic-steps "${flow_hybrid_geodesic_steps}"
     --global-start-noise-std "${global_start_noise_std}"
 )
 
