@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-exp_name="fm_composed_geo"
+exp_name="fm_composed_geo_l2_step16_nodelta_100k"
 gpu_id=0
 train_gpus="0,1,2,3,4,5,6,7"
 
@@ -31,10 +31,10 @@ flow_condition_text_weight="1.0"
 flow_condition_image_weight="1.0"
 flow_path_type="geodesic"   # linear | geodesic
 flow_geodesic_eps="1e-4"
-flow_step_norm_mode="auto" # auto: linear->off, geodesic->on
-flow_step_norm_type="expmap"   # l2 | expmap
+flow_step_norm_mode="on" # auto: linear->off, geodesic->on
+flow_step_norm_type="l2"   # l2 | expmap
 global_start_noise_std="0.0"
-disable_delta=0
+disable_delta=1
 disable_cond_gate=0
 
 extra_flow_args=(
@@ -67,7 +67,7 @@ train_data_path="composed_image_retrieval/train.sh"
 val_data_path="composed_image_retrieval/val.sh"
 train_dataset_type="cc3m"
 val_dataset_type="fashion-iq"
-target_epoch=20
+target_epoch=5
 
 echo "=========================================="
 echo "Train to epoch ${target_epoch}"
@@ -80,14 +80,14 @@ echo "Val data: ${val_data_path} (${val_dataset_type})"
 echo "=========================================="
 
 CUDA_VISIBLE_DEVICES=${train_gpus} python -u src/main_fm.py \
-    --save-frequency 20 \
+    --save-frequency 5 \
     --train-data "${train_data_path}" \
     --val-data "${val_data_path}" \
     --dataset-type "${train_dataset_type}" \
     --dataset-type-val "${val_dataset_type}" \
     --warmup 500 \
     --batch-size 256 \
-    --lr 1e-4 \
+    --lr 5e-5 \
     --wd 0.1 \
     --epochs ${target_epoch} \
     --workers 8 \
@@ -96,5 +96,5 @@ CUDA_VISIBLE_DEVICES=${train_gpus} python -u src/main_fm.py \
     --model ViT-L/14 \
     --resume "${resume_path}" \
     --name "${exp_name}" \
-    --flow-num-steps 4 \
+    --flow-num-steps 16 \
     "${extra_flow_args[@]}"
