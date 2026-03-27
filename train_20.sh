@@ -1,8 +1,8 @@
 #!/bin/bash
 set -e
 # flow_path_type="linear"   # linear | geodesic
-for flow_path_type in "linear"; do
-exp_name="fm_composed_${flow_path_type}_w_ret_tiny"
+for flow_path_type in "geodesic"; do
+exp_name="fm_composed_${flow_path_type}_zero_init"
 gpu_id=0
 train_gpus="0,1,2,3,4,5,6,7"
 
