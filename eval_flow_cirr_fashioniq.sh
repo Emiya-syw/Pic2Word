@@ -8,7 +8,7 @@ set -euo pipefail
 
 GPU_ID="${GPU_ID:-0}"
 CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-0,1}"
-RESUME="${RESUME:-/home/sunyw/CIR/Pic2Word/logs/fm_composed_1e-4/checkpoints/epoch_12.pt}"
+RESUME="${RESUME:-/home/sunyw/CIR/Pic2Word/logs/fm_composed_linear_pure/checkpoints/epoch_10.pt}"
 MODEL_NAME="${MODEL_NAME:-ViT-L/14}"
 LOSS_TYPE="${LOSS_TYPE:-global}"
 EVAL_CIRR_TEST="${EVAL_CIRR_TEST:-0}"  # 1 => additionally run CIRR test split
@@ -60,7 +60,7 @@ run_eval() {
     --loss-type "${LOSS_TYPE}"
     --model "${MODEL_NAME}"
     --eval-csv "${EVAL_CSV_PATH}"
-    --flow-num-steps 8
+    --flow-num-steps 32
     "${extra_flow_args[@]}"
   )
 

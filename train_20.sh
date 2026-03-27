@@ -1,7 +1,8 @@
 #!/bin/bash
 set -e
-
-exp_name="fm_composed_linenar_l2_step16_nodelta_100k"
+# flow_path_type="linear"   # linear | geodesic
+for flow_path_type in "linear" "geodesic"; do
+exp_name="fm_composed_${flow_path_type}_pure"
 gpu_id=0
 train_gpus="0,1,2,3,4,5,6,7"
 
@@ -11,6 +12,9 @@ ckpt_dir="${log_root}/checkpoints"
 resume_path="/home/sunyw/CIR/Pic2Word/weights/pic2word_model.pt"
 
 loss_type="global"
+lambda_fm="1.0"
+lambda_end="0.0"
+lambda_ret="0.00"
 
 # -----------------------------
 # Global flow config
@@ -29,7 +33,6 @@ flow_start_text_weight="1.0"
 flow_start_image_weight="1.0"
 flow_condition_text_weight="1.0"
 flow_condition_image_weight="1.0"
-flow_path_type="linear"   # linear | geodesic
 flow_geodesic_eps="1e-4"
 flow_step_norm_mode="on" # auto: linear->off, geodesic->on
 flow_step_norm_type="l2"   # l2 | expmap
@@ -69,7 +72,7 @@ train_data_path="composed_image_retrieval/train.sh"
 val_data_path="composed_image_retrieval/val.sh"
 train_dataset_type="cc3m"
 val_dataset_type="fashion-iq"
-target_epoch=5
+target_epoch=20
 
 echo "=========================================="
 echo "Train to epoch ${target_epoch}"
@@ -78,11 +81,12 @@ echo "Flow conditioning: ${flow_conditioning}"
 echo "Flow start source: ${flow_start_source}"
 echo "Flow compose method: ${flow_compose_method}"
 echo "Flow path type: ${flow_path_type}"
+echo "Loss weights: lambda_fm=${lambda_fm}, lambda_end=${lambda_end}, lambda_ret=${lambda_ret}"
 echo "Val data: ${val_data_path} (${val_dataset_type})"
 echo "=========================================="
 
 CUDA_VISIBLE_DEVICES=${train_gpus} python -u src/main_fm.py \
-    --save-frequency 5 \
+    --save-frequency 1 \
     --train-data "${train_data_path}" \
     --val-data "${val_data_path}" \
     --dataset-type "${train_dataset_type}" \
@@ -97,6 +101,10 @@ CUDA_VISIBLE_DEVICES=${train_gpus} python -u src/main_fm.py \
     --openai-pretrained \
     --model ViT-L/14 \
     --resume "${resume_path}" \
+    --lambda-fm "${lambda_fm}" \
+    --lambda-end "${lambda_end}" \
+    --lambda-ret "${lambda_ret}" \
     --name "${exp_name}" \
     --flow-num-steps 16 \
     "${extra_flow_args[@]}"
+done
