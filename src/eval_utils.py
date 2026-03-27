@@ -139,7 +139,7 @@ def build_global_flow_feature(model, img2text, ref_images, texts, args, source, 
     source = source.lower()
     if source == "text":
         feature = encode_text_batch(model, texts, args)
-    elif source == "image":
+    elif source in ("image", "inversion"):
         feature = encode_image_via_img2text(model, img2text, ref_images, args)
     elif source == "composed":
         compose_method = getattr(args, "global_flow_compose_method", "add").lower()

@@ -393,14 +393,14 @@ def parse_args():
     parser.add_argument(
         "--global-flow-start-source",
         type=str,
-        choices=["text", "image", "composed"],
+        choices=["text", "image", "inversion", "composed"],
         default="text",
         help="Which feature to use as the start state of the global flow.",
     )
     parser.add_argument(
         "--global-flow-condition-source",
         type=str,
-        choices=["text", "image", "composed"],
+        choices=["text", "image", "inversion", "composed"],
         default="image",
         help="Which feature to use as the extra global flow condition when conditioning is enabled.",
     )
