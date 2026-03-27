@@ -107,7 +107,7 @@ def parse_args():
         type=int,
         help="Number of hidden units in mapping network.")
     parser.add_argument("--droprate",
-        default=0.1,
+        default=0.0,
         type=float,
         help="Dropout rate.")
     parser.add_argument(

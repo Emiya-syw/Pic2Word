@@ -76,6 +76,7 @@ def build_img2text(model, args):
             middle_dim=args.middle_dim,
             output_dim=output_dim,
             n_layer=args.n_layer,
+            dropout=args.droprate,
         )
     except Exception as e:
         logging.warning(f"Falling back to simplified IM2TEXT init due to: {e}")
@@ -85,6 +86,7 @@ def build_img2text(model, args):
             is_normalize=args.normalize_output,
             is_mlp=args.use_mlp,
             n_layer=args.n_layer,
+            dropout=args.droprate,
         )
 
     return img2text

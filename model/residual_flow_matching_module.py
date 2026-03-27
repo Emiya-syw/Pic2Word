@@ -69,6 +69,7 @@ class ConditionalFlowNet(nn.Module):
         hidden_dim=2048,
         num_blocks=4,
         dropout=0.0,
+        zero_init_output=True,
         use_delta=True,
         use_condition=True,
         use_cond_gate=True,
@@ -105,6 +106,9 @@ class ConditionalFlowNet(nn.Module):
 
         self.final_norm = nn.LayerNorm(hidden_dim)
         self.out_proj = nn.Linear(hidden_dim, dim)
+        if zero_init_output:
+            nn.init.zeros_(self.out_proj.weight)
+            nn.init.zeros_(self.out_proj.bias)
 
     def forward(self, x_t, delta=None, e_m=None, t=None):
         # x_t, delta, e_m: [B, D]
