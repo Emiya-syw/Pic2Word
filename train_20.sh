@@ -1,8 +1,8 @@
 #!/bin/bash
 set -e
 # flow_path_type="linear"   # linear | geodesic
-for flow_path_type in "linear" "geodesic"; do
-exp_name="fm_composed_${flow_path_type}_pure"
+for flow_path_type in "linear"; do
+exp_name="fm_composed_${flow_path_type}_w_ret_tiny"
 gpu_id=0
 train_gpus="0,1,2,3,4,5,6,7"
 
@@ -86,7 +86,7 @@ echo "Val data: ${val_data_path} (${val_dataset_type})"
 echo "=========================================="
 
 CUDA_VISIBLE_DEVICES=${train_gpus} python -u src/main_fm.py \
-    --save-frequency 1 \
+    --save-frequency 20 \
     --train-data "${train_data_path}" \
     --val-data "${val_data_path}" \
     --dataset-type "${train_dataset_type}" \

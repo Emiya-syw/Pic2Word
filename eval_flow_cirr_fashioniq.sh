@@ -7,8 +7,8 @@ set -euo pipefail
 #   RESUME=/path/to/checkpoint.pt GPU_ID=0 CUDA_VISIBLE_DEVICES=0,1 EVAL_CSV_PATH=./logs/my_eval.csv bash eval_flow_cirr_fashioniq.sh
 
 GPU_ID="${GPU_ID:-0}"
-CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-0,1}"
-RESUME="${RESUME:-/home/sunyw/CIR/Pic2Word/logs/fm_composed_linear_pure/checkpoints/epoch_10.pt}"
+CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-0,1,2,3,4,5,6,7}"
+RESUME="${RESUME:-/home/sunyw/CIR/Pic2Word/logs/fm_composed_geodesic_pure/checkpoints/epoch_7.pt}"
 MODEL_NAME="${MODEL_NAME:-ViT-L/14}"
 LOSS_TYPE="${LOSS_TYPE:-global}"
 EVAL_CIRR_TEST="${EVAL_CIRR_TEST:-0}"  # 1 => additionally run CIRR test split
@@ -25,7 +25,13 @@ flow_start_image_weight="${FLOW_START_IMAGE_WEIGHT:-1.0}"
 flow_condition_text_weight="${FLOW_CONDITION_TEXT_WEIGHT:-1.0}"
 flow_condition_image_weight="${FLOW_CONDITION_IMAGE_WEIGHT:-1.0}"
 global_start_noise_std="${GLOBAL_START_NOISE_STD:-0.0}"
+flow_path_type="${FLOW_PATH_TYPE:-linear}" # linear | geodesic
+flow_geodesic_eps="${FLOW_GEODESIC_EPS:-1e-4}"
+flow_step_norm_mode="${FLOW_STEP_NORM_MODE:-on}" # on | off | auto
+flow_step_norm_type="${FLOW_STEP_NORM_TYPE:-l2}" # l2 | expmap
 flow_hybrid_geodesic_steps="${FLOW_HYBRID_GEODESIC_STEPS:-0}"
+disable_delta="${DISABLE_DELTA:-1}" # match your training script default
+disable_cond_gate="${DISABLE_COND_GATE:-0}"
 
 extra_flow_args=(
   --global-flow-conditioning "${flow_conditioning}"
@@ -38,8 +44,20 @@ extra_flow_args=(
   --global-flow-condition-text-weight "${flow_condition_text_weight}"
   --global-flow-condition-image-weight "${flow_condition_image_weight}"
   --global-start-noise-std "${global_start_noise_std}"
+  --flow-path-type "${flow_path_type}"
+  --flow-geodesic-eps "${flow_geodesic_eps}"
+  --flow-step-norm-mode "${flow_step_norm_mode}"
+  --flow-step-norm-type "${flow_step_norm_type}"
   --flow-hybrid-geodesic-steps "${flow_hybrid_geodesic_steps}"
 )
+
+if [[ "${disable_delta}" == "1" ]]; then
+  extra_flow_args+=(--global-flow-disable-delta)
+fi
+
+if [[ "${disable_cond_gate}" == "1" ]]; then
+  extra_flow_args+=(--global-flow-disable-cond-gate)
+fi
 
 run_eval() {
   local mode="$1"
@@ -49,6 +67,7 @@ run_eval() {
   echo "Running eval mode: ${mode} ${source:+(source=${source})}"
   echo "Checkpoint: ${RESUME}"
   echo "CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES}, GPU_ID=${GPU_ID}"
+  echo "Flow cfg: conditioning=${flow_conditioning}, disable_delta=${disable_delta}, disable_cond_gate=${disable_cond_gate}, path=${flow_path_type}"
   echo "=================================================="
 
   local cmd=(
