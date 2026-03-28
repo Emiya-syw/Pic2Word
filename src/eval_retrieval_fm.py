@@ -205,6 +205,8 @@ def build_flow_net(model, args):
         use_delta=getattr(args, "global_flow_use_delta", True),
         use_condition=getattr(args, "global_flow_conditioning", "enabled") == "enabled",
         use_cond_gate=getattr(args, "global_flow_use_cond_gate", True),
+        block_type=getattr(args, "global_flow_block_type", "residual"),
+        film_expansion=getattr(args, "global_flow_film_expansion", 2),
     )
     return flow_net
 
