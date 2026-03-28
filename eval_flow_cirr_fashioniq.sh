@@ -32,6 +32,8 @@ flow_step_norm_type="${FLOW_STEP_NORM_TYPE:-l2}" # l2 | expmap
 flow_hybrid_geodesic_steps="${FLOW_HYBRID_GEODESIC_STEPS:-0}"
 disable_delta="${DISABLE_DELTA:-1}" # match your training script default
 disable_cond_gate="${DISABLE_COND_GATE:-0}"
+flow_block_type="${FLOW_BLOCK_TYPE:-residual}"       # residual | film
+flow_film_expansion="${FLOW_FILM_EXPANSION:-2}"      # used when FLOW_BLOCK_TYPE=film
 
 extra_flow_args=(
   --global-flow-conditioning "${flow_conditioning}"
@@ -49,6 +51,8 @@ extra_flow_args=(
   --flow-step-norm-mode "${flow_step_norm_mode}"
   --flow-step-norm-type "${flow_step_norm_type}"
   --flow-hybrid-geodesic-steps "${flow_hybrid_geodesic_steps}"
+  --global-flow-block-type "${flow_block_type}"
+  --global-flow-film-expansion "${flow_film_expansion}"
 )
 
 if [[ "${disable_delta}" == "1" ]]; then
@@ -67,7 +71,7 @@ run_eval() {
   echo "Running eval mode: ${mode} ${source:+(source=${source})}"
   echo "Checkpoint: ${RESUME}"
   echo "CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES}, GPU_ID=${GPU_ID}"
-  echo "Flow cfg: conditioning=${flow_conditioning}, disable_delta=${disable_delta}, disable_cond_gate=${disable_cond_gate}, path=${flow_path_type}"
+  echo "Flow cfg: conditioning=${flow_conditioning}, disable_delta=${disable_delta}, disable_cond_gate=${disable_cond_gate}, path=${flow_path_type}, block=${flow_block_type}, film_expansion=${flow_film_expansion}"
   echo "=================================================="
 
   local cmd=(
