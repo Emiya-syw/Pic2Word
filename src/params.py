@@ -453,6 +453,19 @@ def parse_args():
         default=False,
         help="Disable delta=x_t-x0 input in the global flow net.",
     )
+    parser.add_argument(
+        "--global-flow-block-type",
+        type=str,
+        choices=["residual", "film"],
+        default="residual",
+        help="Flow trunk type: plain residual MLP blocks or FiLM residual blocks.",
+    )
+    parser.add_argument(
+        "--global-flow-film-expansion",
+        type=int,
+        default=2,
+        help="Expansion ratio used by FiLM residual blocks when block-type=film.",
+    )
     parser.add_argument("--lambda-fm", type=float, default=1.0, help="Weight of the flow matching loss.")
     parser.add_argument("--lambda-end", type=float, default=1.0, help="Weight of the endpoint reconstruction loss.")
     parser.add_argument("--lambda-ret", type=float, default=0.05, help="Weight of the global retrieval loss.")

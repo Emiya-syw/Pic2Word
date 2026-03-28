@@ -237,6 +237,8 @@ def main_worker(gpu, ngpus_per_node, log_queue, args):
         use_delta=args.global_flow_use_delta,
         use_condition=args.global_flow_conditioning == "enabled",
         use_cond_gate=args.global_flow_use_cond_gate,
+        block_type=args.global_flow_block_type,
+        film_expansion=args.global_flow_film_expansion,
     )
 
     # --------------------------------------------------
