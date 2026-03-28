@@ -49,6 +49,29 @@ class ResidualMLPBlock(nn.Module):
         return residual + x
 
 
+class FiLMResidualBlock(nn.Module):
+    def __init__(self, hidden_dim, cond_dim, expansion=2, dropout=0.0):
+        super().__init__()
+        inner_dim = hidden_dim * expansion
+        self.norm = nn.LayerNorm(hidden_dim)
+        self.film = nn.Linear(cond_dim, hidden_dim * 2)
+        self.fc1 = nn.Linear(hidden_dim, inner_dim)
+        self.act = nn.SiLU()
+        self.drop = nn.Dropout(dropout)
+        self.fc2 = nn.Linear(inner_dim, hidden_dim)
+        self.gate = nn.Linear(cond_dim, hidden_dim)
+
+    def forward(self, x, cond):
+        scale, shift = self.film(cond).chunk(2, dim=-1)
+        h = self.norm(x)
+        h = h * (1.0 + scale) + shift
+        h = self.fc1(h)
+        h = self.act(h)
+        h = self.drop(h)
+        h = self.fc2(h)
+        return x + torch.sigmoid(self.gate(cond)) * h
+
+
 class ConditionalFlowNet(nn.Module):
     """
     Residual MLP for global-token / vector flow matching.
@@ -61,6 +84,10 @@ class ConditionalFlowNet(nn.Module):
 
     Output:
         v     : [B, D] predicted velocity
+
+    Notes:
+        block_type='residual': standard residual MLP trunk.
+        block_type='film': FiLM-style residual trunk conditioned on (e_m, t).
     """
     def __init__(
         self,
@@ -74,6 +101,8 @@ class ConditionalFlowNet(nn.Module):
         use_condition=True,
         use_cond_gate=True,
         out_norm=False,
+        block_type="residual",
+        film_expansion=2,
     ):
         super().__init__()
         self.time_embed = TimeEmbedding(time_dim)
@@ -81,6 +110,7 @@ class ConditionalFlowNet(nn.Module):
         self.use_condition = use_condition
         self.use_cond_gate = use_cond_gate and use_condition
         self.out_norm = out_norm
+        self.block_type = block_type
 
         feature_inputs = 1 + int(self.use_delta) + int(self.use_condition)
         in_dim = dim * feature_inputs + time_dim
@@ -90,10 +120,23 @@ class ConditionalFlowNet(nn.Module):
             nn.SiLU(),
         )
 
-        self.blocks = nn.ModuleList([
-            ResidualMLPBlock(hidden_dim, hidden_dim=hidden_dim * 4, dropout=dropout)
-            for _ in range(num_blocks)
-        ])
+        if self.block_type == "residual":
+            self.blocks = nn.ModuleList([
+                ResidualMLPBlock(hidden_dim, hidden_dim=hidden_dim * 4, dropout=dropout)
+                for _ in range(num_blocks)
+            ])
+        elif self.block_type == "film":
+            self.blocks = nn.ModuleList([
+                FiLMResidualBlock(
+                    hidden_dim=hidden_dim,
+                    cond_dim=hidden_dim,
+                    expansion=film_expansion,
+                    dropout=dropout,
+                )
+                for _ in range(num_blocks)
+            ])
+        else:
+            raise ValueError(f"Unsupported block_type: {self.block_type}")
 
         self.gate = None
         if self.use_cond_gate:
@@ -109,6 +152,14 @@ class ConditionalFlowNet(nn.Module):
         if zero_init_output:
             nn.init.zeros_(self.out_proj.weight)
             nn.init.zeros_(self.out_proj.bias)
+
+        self.film_cond_proj = None
+        if self.block_type == "film":
+            self.film_cond_proj = nn.Sequential(
+                nn.Linear(dim + time_dim, hidden_dim),
+                nn.SiLU(),
+                nn.Linear(hidden_dim, hidden_dim),
+            )
 
     def forward(self, x_t, delta=None, e_m=None, t=None):
         # x_t, delta, e_m: [B, D]
@@ -143,8 +194,14 @@ class ConditionalFlowNet(nn.Module):
             h = h * gate
 
         # residual trunk
-        for block in self.blocks:
-            h = block(h)
+        if self.block_type == "residual":
+            for block in self.blocks:
+                h = block(h)
+        else:
+            film_condition = e_m if e_m is not None else x_t
+            cond = self.film_cond_proj(torch.cat([film_condition, t_emb], dim=-1))
+            for block in self.blocks:
+                h = block(h, cond)
 
         h = self.final_norm(h)
         v = self.out_proj(h)  # [B, D]
