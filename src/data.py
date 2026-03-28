@@ -387,7 +387,7 @@ class CC3M_FM(Dataset):
     }
     """
 
-    def __init__(self, transforms, json_file='/home/sunyw/CIR/Pic2Word/data/MT-CIR/mtcir_target_caption_merged_subset.json', split='train', root='/home/sunyw/CIR/Pic2Word/data/LLaVA-Pretrain'):
+    def __init__(self, transforms, json_file='/home/sunyw/CIR/Pic2Word/data/MT-CIR/mtcir_target_caption_merged_filter.json', split='train', root='/home/sunyw/CIR/Pic2Word/data/LLaVA-Pretrain'):
         self.transforms = transforms
         self.split = split
         self.json_file = json_file

@@ -2,7 +2,7 @@
 set -e
 # flow_path_type="linear"   # linear | geodesic
 for flow_path_type in "geodesic"; do
-exp_name="fm_composed_${flow_path_type}_zero_init"
+exp_name="fm_composed_${flow_path_type}_zero_init_cond_v_gate"
 gpu_id=0
 train_gpus="0,1,2,3,4,5,6,7"
 
@@ -14,7 +14,7 @@ resume_path="/home/sunyw/CIR/Pic2Word/weights/pic2word_model.pt"
 loss_type="global"
 lambda_fm="1.0"
 lambda_end="0.0"
-lambda_ret="0.00"
+lambda_ret="0.0002"
 
 # -----------------------------
 # Global flow config
@@ -24,9 +24,9 @@ lambda_ret="0.00"
 #   3) composed feature 优先走 pic2word 方式
 # 如果训练文本里没有 "*" 占位符，请把 compose_method 改成 add 或 mean。
 # -----------------------------
-flow_conditioning="disabled"
-flow_start_source="composed"
-flow_condition_source="image"
+flow_conditioning="enabled"
+flow_start_source="text"
+flow_condition_source="inversion"
 flow_compose_method="pic2word"
 flow_pic2word_marker="*"
 flow_start_text_weight="1.0"
@@ -86,7 +86,7 @@ echo "Val data: ${val_data_path} (${val_dataset_type})"
 echo "=========================================="
 
 CUDA_VISIBLE_DEVICES=${train_gpus} python -u src/main_fm.py \
-    --save-frequency 20 \
+    --save-frequency 1 \
     --train-data "${train_data_path}" \
     --val-data "${val_data_path}" \
     --dataset-type "${train_dataset_type}" \
