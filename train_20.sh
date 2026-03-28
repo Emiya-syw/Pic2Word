@@ -40,6 +40,8 @@ flow_hybrid_geodesic_steps="0" # 0=off; >0 => first s steps geodesic, remaining 
 global_start_noise_std="0.0"
 disable_delta=1
 disable_cond_gate=0
+flow_block_type="${FLOW_BLOCK_TYPE:-residual}"      # residual | film
+flow_film_expansion="${FLOW_FILM_EXPANSION:-2}"     # used when flow_block_type=film
 
 extra_flow_args=(
     --global-flow-conditioning "${flow_conditioning}"
@@ -57,6 +59,8 @@ extra_flow_args=(
     --flow-step-norm-type "${flow_step_norm_type}"
     --flow-hybrid-geodesic-steps "${flow_hybrid_geodesic_steps}"
     --global-start-noise-std "${global_start_noise_std}"
+    --global-flow-block-type "${flow_block_type}"
+    --global-flow-film-expansion "${flow_film_expansion}"
 )
 
 if [ "${disable_delta}" -eq 1 ]; then
@@ -81,6 +85,7 @@ echo "Flow conditioning: ${flow_conditioning}"
 echo "Flow start source: ${flow_start_source}"
 echo "Flow compose method: ${flow_compose_method}"
 echo "Flow path type: ${flow_path_type}"
+echo "Flow block type: ${flow_block_type} (film_expansion=${flow_film_expansion})"
 echo "Loss weights: lambda_fm=${lambda_fm}, lambda_end=${lambda_end}, lambda_ret=${lambda_ret}"
 echo "Val data: ${val_data_path} (${val_dataset_type})"
 echo "=========================================="
