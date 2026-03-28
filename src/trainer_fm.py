@@ -140,9 +140,14 @@ def _normalize_feature(x, eps=1e-6):
     return x / x.norm(dim=-1, keepdim=True).clamp(min=eps)
 
 
+def _project_to_tangent(x, v):
+    x_unit = _normalize_feature(x)
+    return v - (v * x_unit).sum(dim=-1, keepdim=True) * x_unit
+
+
 def _sphere_expmap_step(x, v, dt, eps=1e-6):
     x_unit = _normalize_feature(x, eps=eps)
-    v_tan = v - (v * x_unit).sum(dim=-1, keepdim=True) * x_unit
+    v_tan = _project_to_tangent(x_unit, v)
     speed = v_tan.norm(dim=-1, keepdim=True).clamp(min=eps)
     theta = dt * speed
     direction = v_tan / speed
@@ -231,18 +236,20 @@ def flow_matching_inference(
         velocity = torch.tanh(velocity)
         if hybrid_geodesic_steps > 0:
             if k < hybrid_geodesic_steps:
+                velocity_tan = _project_to_tangent(x_t, velocity)
                 if step_norm_type == "expmap":
-                    x_t = _sphere_expmap_step(x_t, velocity, dt=dt)
+                    x_t = _sphere_expmap_step(x_t, velocity_tan, dt=dt)
                 else:
-                    x_t = _normalize_feature(x_t + dt * velocity)
+                    x_t = _normalize_feature(x_t + dt * velocity_tan)
             else:
                 x_t = x_t + dt * velocity
         else:
             if step_normalize:
+                velocity_tan = _project_to_tangent(x_t, velocity)
                 if step_norm_type == "expmap":
-                    x_t = _sphere_expmap_step(x_t, velocity, dt=dt)
+                    x_t = _sphere_expmap_step(x_t, velocity_tan, dt=dt)
                 else:
-                    x_t = _normalize_feature(x_t + dt * velocity)
+                    x_t = _normalize_feature(x_t + dt * velocity_tan)
             else:
                 x_t = x_t + dt * velocity
 
