@@ -290,9 +290,13 @@ def flow_matching_inference(
     def l2norm(x):
         return x / x.norm(dim=-1, keepdim=True).clamp(min=eps)
 
+    def project_to_tangent(x, v):
+        x_unit = l2norm(x)
+        return v - (v * x_unit).sum(dim=-1, keepdim=True) * x_unit
+
     def sphere_expmap_step(x, v, dt):
         x_unit = l2norm(x)
-        v_tan = v - (v * x_unit).sum(dim=-1, keepdim=True) * x_unit
+        v_tan = project_to_tangent(x_unit, v)
         speed = v_tan.norm(dim=-1, keepdim=True).clamp(min=eps)
         theta = dt * speed
         direction = v_tan / speed
@@ -321,18 +325,20 @@ def flow_matching_inference(
         v = torch.tanh(v)
         if hybrid_geodesic_steps > 0:
             if k < hybrid_geodesic_steps:
+                v_tan = project_to_tangent(x_t, v)
                 if step_norm_type == "expmap":
-                    x_t = sphere_expmap_step(x_t, v, dt=dt)
+                    x_t = sphere_expmap_step(x_t, v_tan, dt=dt)
                 else:
-                    x_t = l2norm(x_t + dt * v)
+                    x_t = l2norm(x_t + dt * v_tan)
             else:
                 x_t = x_t + dt * v
         else:
             if step_normalize:
+                v_tan = project_to_tangent(x_t, v)
                 if step_norm_type == "expmap":
-                    x_t = sphere_expmap_step(x_t, v, dt=dt)
+                    x_t = sphere_expmap_step(x_t, v_tan, dt=dt)
                 else:
-                    x_t = l2norm(x_t + dt * v)
+                    x_t = l2norm(x_t + dt * v_tan)
             else:
                 x_t = x_t + dt * v
 
