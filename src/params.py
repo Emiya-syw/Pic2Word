@@ -470,6 +470,17 @@ def parse_args():
     parser.add_argument("--lambda-end", type=float, default=1.0, help="Weight of the endpoint reconstruction loss.")
     parser.add_argument("--lambda-ret", type=float, default=0.05, help="Weight of the global retrieval loss.")
     parser.add_argument("--lambda-mid", type=float, default=0.5, help="Reserved weight for mid-point losses.")
+    parser.add_argument(
+        "--flow-training-objective",
+        type=str,
+        choices=["flow_matching", "start_end_mse"],
+        default="flow_matching",
+        help=(
+            "Training objective for flow net. "
+            "'flow_matching': standard FM + endpoint/retrieval losses; "
+            "'start_end_mse': disable FM target and directly regress start embedding to end embedding with MSE."
+        ),
+    )
     args = parser.parse_args()
     args.global_flow_use_cond_gate = not args.global_flow_disable_cond_gate
     args.global_flow_use_delta = not args.global_flow_disable_delta

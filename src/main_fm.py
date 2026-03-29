@@ -300,6 +300,7 @@ def main_worker(gpu, ngpus_per_node, log_queue, args):
         lambda_fm=args.lambda_fm,
         lambda_end=args.lambda_end,
         lambda_ret=args.lambda_ret,
+        training_objective=getattr(args, "flow_training_objective", "flow_matching"),
         # lambda_mid=args.lambda_mid,
         temperature=args.flow_temperature,
         path_type=args.flow_path_type,
@@ -607,6 +608,8 @@ def main():
         args.lambda_ret = 0.05
     if not hasattr(args, "lambda_mid"):
         args.lambda_mid = 0.5
+    if not hasattr(args, "flow_training_objective"):
+        args.flow_training_objective = "flow_matching"
     if not hasattr(args, "global_start_noise_std"):
         args.global_start_noise_std = 0.0
     if not hasattr(args, "loss_type"):
@@ -622,6 +625,7 @@ def main():
             f"flowhd={args.flow_hidden_dim}_"
             f"steps={args.flow_num_steps}_"
             f"path={args.flow_path_type}_"
+            f"obj={args.flow_training_objective}_"
             f"gnoise={args.global_start_noise_std}"
         )
         if args.time_suffix:
