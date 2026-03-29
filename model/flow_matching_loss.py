@@ -47,6 +47,7 @@ class FlowMatchingLoss(nn.Module):
         step_normalize=True,
         step_norm_type="l2",
         hybrid_geodesic_steps=0,
+        training_objective="flow_matching",
     ):
         """
         A simplified and more stable flow matching loss.
@@ -77,6 +78,7 @@ class FlowMatchingLoss(nn.Module):
         self.step_normalize = step_normalize
         self.step_norm_type = step_norm_type
         self.hybrid_geodesic_steps = max(0, int(hybrid_geodesic_steps))
+        self.training_objective = training_objective
 
     def _maybe_normalize_inputs(self, q, y, e_m=None):
         if self.normalize:
@@ -217,17 +219,24 @@ class FlowMatchingLoss(nn.Module):
         device = q.device
         dtype = q.dtype
 
-        # 1) flow matching loss
-        t = torch.rand(B, 1, device=device, dtype=dtype)
+        if self.training_objective == "flow_matching":
+            # 1) flow matching loss
+            t = torch.rand(B, 1, device=device, dtype=dtype)
+            x_t, u_star = self._path_target(q, y, t)
+            u_pred = self._flow_net_call(x_t, q, e_m, t)
+            loss_fm = F.mse_loss(u_pred, u_star)
 
-        x_t, u_star = self._path_target(q, y, t)
-        u_pred = self._flow_net_call(x_t, q, e_m, t)
-
-        loss_fm = F.mse_loss(u_pred, u_star)
-
-        # 2) endpoint loss
-        y_hat = self.integrate_flow(q, e_m)
-        loss_end = F.mse_loss(y_hat, y)
+            # 2) endpoint loss
+            y_hat = self.integrate_flow(q, e_m)
+            loss_end = F.mse_loss(y_hat, y)
+        elif self.training_objective == "start_end_mse":
+            # Ablation: remove flow-matching target; directly regress start->end.
+            t0 = torch.zeros(B, 1, device=device, dtype=dtype)
+            y_hat = self._flow_net_call(q, q, e_m, t0)
+            loss_fm = torch.zeros((), device=device, dtype=dtype)
+            loss_end = F.mse_loss(y_hat, y)
+        else:
+            raise ValueError(f"Unsupported training_objective: {self.training_objective}")
         # mse_end = F.mse_loss(y_hat, y)
         # cos_end = (1.0 - F.cosine_similarity(y_hat, y, dim=-1)).mean()
         

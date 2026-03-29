@@ -210,6 +210,7 @@ def flow_matching_inference(
     q,
     e_m=None,
     num_steps=4,
+    training_objective="flow_matching",
     step_normalize=True,
     step_norm_type="l2",
     hybrid_geodesic_steps=0,
@@ -221,6 +222,10 @@ def flow_matching_inference(
     x_t = q.clone()
     x0 = q.clone()
     batch_size = q.size(0)
+    if training_objective == "start_end_mse":
+        t0 = torch.zeros((batch_size, 1), device=q.device, dtype=q.dtype)
+        return torch.tanh(flow_net(q, delta=torch.zeros_like(q), e_m=e_m, t=t0))
+
     dt = 1.0 / num_steps
     hybrid_geodesic_steps = max(0, min(int(hybrid_geodesic_steps), int(num_steps)))
 
@@ -405,6 +410,7 @@ def validate(model, img2text, flow_net, criterion, data, epoch, args, writer=Non
                 q=q,
                 e_m=e_m,
                 num_steps=getattr(args, "flow_num_steps", 16),
+                training_objective=getattr(args, "flow_training_objective", "flow_matching"),
                 step_normalize=getattr(args, "flow_step_normalize", True),
                 step_norm_type=getattr(args, "flow_step_norm_type", "l2"),
                 hybrid_geodesic_steps=getattr(args, "flow_hybrid_geodesic_steps", 0),
