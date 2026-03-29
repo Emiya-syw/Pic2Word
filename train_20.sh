@@ -1,8 +1,9 @@
 #!/bin/bash
 set -e
-# flow_path_type="linear"   # linear | geodesic
+
 for flow_path_type in "geodesic"; do
-exp_name="fm_composed_${flow_path_type}_zero_init_cond_v_gate"
+for flow_condition_source in "inversion" "image"; do
+exp_name="fm_composed_${flow_path_type}_${flow_condition_source}_cond_v_gate_exp_film"
 gpu_id=0
 train_gpus="0,1,2,3,4,5,6,7"
 
@@ -26,7 +27,7 @@ lambda_ret="0.0002"
 # -----------------------------
 flow_conditioning="enabled"
 flow_start_source="text"
-flow_condition_source="inversion"
+# flow_condition_source="inversion"
 flow_compose_method="pic2word"
 flow_pic2word_marker="*"
 flow_start_text_weight="1.0"
@@ -35,12 +36,13 @@ flow_condition_text_weight="1.0"
 flow_condition_image_weight="1.0"
 flow_geodesic_eps="1e-4"
 flow_step_norm_mode="on" # auto: linear->off, geodesic->on
-flow_step_norm_type="l2"   # l2 | expmap
+flow_step_norm_type="expmap"   # l2 | expmap
 flow_hybrid_geodesic_steps="0" # 0=off; >0 => first s steps geodesic, remaining linear
 global_start_noise_std="0.0"
+# flow_path_type="linear"   # linear | geodesic
 disable_delta=1
 disable_cond_gate=0
-flow_block_type="${FLOW_BLOCK_TYPE:-residual}"      # residual | film
+flow_block_type="${FLOW_BLOCK_TYPE:-film}"      # residual | film
 flow_film_expansion="${FLOW_FILM_EXPANSION:-2}"     # used when flow_block_type=film
 
 extra_flow_args=(
@@ -76,7 +78,7 @@ train_data_path="composed_image_retrieval/train.sh"
 val_data_path="composed_image_retrieval/val.sh"
 train_dataset_type="cc3m"
 val_dataset_type="fashion-iq"
-target_epoch=20
+target_epoch=10
 
 echo "=========================================="
 echo "Train to epoch ${target_epoch}"
@@ -112,4 +114,5 @@ CUDA_VISIBLE_DEVICES=${train_gpus} python -u src/main_fm.py \
     --name "${exp_name}" \
     --flow-num-steps 16 \
     "${extra_flow_args[@]}"
+done
 done
