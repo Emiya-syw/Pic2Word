@@ -454,6 +454,15 @@ def parse_args():
         help="Marker token inserted in prompts when compose-method=pic2word.",
     )
     parser.add_argument(
+        "--global-flow-pic2word-num-tokens",
+        type=int,
+        default=1,
+        help=(
+            "Number of pseudo-word slots to inject for pic2word without changing dataset text. "
+            "When >1, the single marker token in text is expanded to repeated marker slots at runtime."
+        ),
+    )
+    parser.add_argument(
         "--global-flow-disable-cond-gate",
         action="store_true",
         default=False,
@@ -503,6 +512,7 @@ def parse_args():
     else:
         args.flow_step_normalize = args.flow_path_type != "linear"
     args.flow_hybrid_geodesic_steps = max(0, int(args.flow_hybrid_geodesic_steps))
+    args.global_flow_pic2word_num_tokens = max(1, int(args.global_flow_pic2word_num_tokens))
     args.aggregate = not args.skip_aggregate
 
     # If some params are not passed, we use the default values based on model name.
