@@ -258,6 +258,12 @@ def parse_args():
         action="store_true",
         help="If set, unfreeze and train CLIP text encoder parameters together with img2text.",
     )
+    parser.add_argument(
+        "--train-img2text",
+        default=False,
+        action="store_true",
+        help="If set, unfreeze and train img2text in flow-matching training.",
+    )
     # arguments for distributed training
     parser.add_argument(
         "--dist-url",

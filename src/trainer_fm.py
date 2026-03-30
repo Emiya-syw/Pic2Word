@@ -16,6 +16,7 @@ import os
 import time
 import logging
 import wandb
+import contextlib
 import torch
 import torch.nn.functional as F
 from torch.cuda.amp import autocast
@@ -471,7 +472,10 @@ def train(model, img2text, flow_net, criterion, data, epoch, optimizer, scaler, 
 
     # frozen modules
     model.eval()
-    img2text.eval()
+    if getattr(args, "train_img2text", False):
+        img2text.train()
+    else:
+        img2text.eval()
     flow_net.train()
 
     dataloader, sampler = data["train"].dataloader, data["train"].sampler
@@ -519,7 +523,8 @@ def train(model, img2text, flow_net, criterion, data, epoch, optimizer, scaler, 
         # e_m : optional configurable condition embedding
         # y   : target/generated caption -> text encoder
         # --------------------------------------------------
-        with torch.no_grad():
+        feature_ctx = contextlib.nullcontext() if getattr(args, "train_img2text", False) else torch.no_grad()
+        with feature_ctx:
             if args.loss_type != "global":
                 raise ValueError(f"Unsupported loss_type: {args.loss_type}")
             q = build_global_flow_feature(

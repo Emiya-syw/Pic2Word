@@ -62,6 +62,13 @@ def freeze_module(module):
     module.eval()
 
 
+def unfreeze_module(module):
+    """Unfreeze all parameters in a module."""
+    for p in module.parameters():
+        p.requires_grad = True
+    module.train()
+
+
 def build_img2text(model, args):
     """
     Build img2text mapper.
@@ -245,7 +252,10 @@ def main_worker(gpu, ngpus_per_node, log_queue, args):
     # 4. Freeze modules that should not be updated
     # --------------------------------------------------
     freeze_module(model)
-    freeze_module(img2text)
+    if args.train_img2text:
+        unfreeze_module(img2text)
+    else:
+        freeze_module(img2text)
     # flow_net stays trainable
 
     # --------------------------------------------------
@@ -313,12 +323,16 @@ def main_worker(gpu, ngpus_per_node, log_queue, args):
 
     # --------------------------------------------------
     # 8. Optimizer / Scheduler
-    # Only optimize flow_net
+    # Optimize flow_net (+ optional img2text)
     # --------------------------------------------------
     exclude = lambda n: ("bn" in n) or ("ln" in n) or ("bias" in n)
     include = lambda n: not exclude(n)
 
     named_parameters = list(unwrap_model(flow_net).named_parameters())
+    if args.train_img2text:
+        named_parameters.extend(
+            [(f"img2text.{n}", p) for n, p in unwrap_model(img2text).named_parameters()]
+        )
     gain_or_bias_params = [p for n, p in named_parameters if exclude(n) and p.requires_grad]
     rest_params = [p for n, p in named_parameters if include(n) and p.requires_grad]
 
