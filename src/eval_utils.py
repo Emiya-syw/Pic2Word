@@ -108,6 +108,39 @@ def encode_image_via_img2text(model, img2text, images, args):
     return text_features
 
 
+def _expand_pic2word_marker_slots(text_tokens, marker_token_id, num_slots):
+    if num_slots <= 1:
+        return text_tokens
+
+    context_length = text_tokens.size(1)
+    eot_token_id = tokenize([""])[0][1].item()
+    expanded_rows = []
+    for row in text_tokens:
+        seq = row.tolist()
+        valid_len = 0
+        for token_id in seq:
+            if token_id == 0:
+                break
+            valid_len += 1
+        valid_seq = seq[:valid_len]
+        try:
+            marker_idx = valid_seq.index(marker_token_id)
+        except ValueError:
+            expanded_rows.append(row)
+            continue
+
+        new_seq = valid_seq[:marker_idx] + [marker_token_id] * num_slots + valid_seq[marker_idx + 1 :]
+        if len(new_seq) > context_length:
+            new_seq = new_seq[:context_length]
+            if eot_token_id not in new_seq:
+                new_seq[-1] = eot_token_id
+
+        padded = new_seq + [0] * (context_length - len(new_seq))
+        expanded_rows.append(row.new_tensor(padded))
+
+    return torch.stack(expanded_rows, dim=0)
+
+
 def _normalize_feature(x, eps=1e-6):
     return x / x.norm(dim=-1, keepdim=True).clamp(min=eps)
 
@@ -116,6 +149,8 @@ def encode_pic2word_composed_feature(model, img2text, images, texts, args):
     text_tokens = tokenize_to_device(texts, args)
     split_text = getattr(args, "global_flow_pic2word_marker", "*")
     split_token_id = tokenize([split_text])[0][1].item()
+    num_pic2word_tokens = max(1, int(getattr(args, "global_flow_pic2word_num_tokens", 1)))
+    text_tokens = _expand_pic2word_marker_slots(text_tokens, split_token_id, num_pic2word_tokens)
 
     if not torch.all((text_tokens == split_token_id).any(dim=1)):
         raise ValueError(
@@ -126,6 +161,8 @@ def encode_pic2word_composed_feature(model, img2text, images, texts, args):
     image_features = model.encode_image(images)
     # image_features = _normalize_feature(image_features)
     query_image_tokens = img2text(image_features)
+    if num_pic2word_tokens > 1:
+        query_image_tokens = tuple(query_image_tokens for _ in range(num_pic2word_tokens))
     composed_feature = model.encode_text_img_retrieval(
         text_tokens,
         query_image_tokens,
