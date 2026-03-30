@@ -8,7 +8,7 @@ set -euo pipefail
 
 GPU_ID="${GPU_ID:-0}"
 CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-0,1,2,3,4,5,6,7}"
-RESUME="${RESUME:-/home/sunyw/CIR/Pic2Word/logs/fm_composed_geodesic_image_cond_v_gate_exp_film/checkpoints/epoch_10.pt}"
+RESUME="${RESUME:-/home/sunyw/CIR/Pic2Word/logs/fm_composed_geodesic_image2/checkpoints/epoch_10.pt}"
 MODEL_NAME="${MODEL_NAME:-ViT-L/14}"
 LOSS_TYPE="${LOSS_TYPE:-global}"
 EVAL_CIRR_TEST="${EVAL_CIRR_TEST:-0}"  # 1 => additionally run CIRR test split
@@ -53,6 +53,7 @@ extra_flow_args=(
   --flow-hybrid-geodesic-steps "${flow_hybrid_geodesic_steps}"
   --global-flow-block-type "${flow_block_type}"
   --global-flow-film-expansion "${flow_film_expansion}"
+  --global-flow-pic2word-topk-text "2"
 )
 
 if [[ "${disable_delta}" == "1" ]]; then
@@ -95,7 +96,7 @@ run_eval() {
 }
 
 # 1) CIRR validation split
-run_eval "cirr"
+# run_eval "cirr"
 
 # Optional: CIRR test split (will write jsons under res_cirr/)
 # if [[ "${EVAL_CIRR_TEST}" == "1" ]]; then
@@ -103,7 +104,11 @@ run_eval "cirr"
 # fi
 
 # 2) FashionIQ categories
-for cloth_type in shirt dress toptee; do
+# for cloth_type in shirt dress toptee; do
+#   run_eval "fashion" "${cloth_type}"
+# done
+
+for cloth_type in dress; do
   run_eval "fashion" "${cloth_type}"
 done
 

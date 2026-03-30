@@ -1,9 +1,11 @@
 #!/bin/bash
 set -e
 
-for flow_path_type in "geodesic"; do
-for flow_condition_source in "image"; do
-exp_name="fm_composed_${flow_path_type}_${flow_condition_source}2"
+# for flow_path_type in "geodesic"; do
+# for flow_condition_source in "image"; do
+# exp_name="fm_geodesic_text_image"
+exp_name="fm_geodesic_image_text_v2"
+
 gpu_id=0
 train_gpus="0,1,2,3,4,5,6,7"
 
@@ -15,7 +17,7 @@ resume_path="/home/sunyw/CIR/Pic2Word/weights/pic2word_model.pt"
 loss_type="global"
 lambda_fm="1.0"
 lambda_end="0.0"
-lambda_ret="0.0002"
+lambda_ret="0.000"
 
 # -----------------------------
 # Global flow config
@@ -26,8 +28,8 @@ lambda_ret="0.0002"
 # 如果训练文本里没有 "*" 占位符，请把 compose_method 改成 add 或 mean。
 # -----------------------------
 flow_conditioning="enabled"
-flow_start_source="composed"
-# flow_condition_source="inversion"
+flow_start_source="text"
+flow_condition_source="image"
 flow_compose_method="pic2word"
 flow_pic2word_marker="*"
 flow_start_text_weight="1.0"
@@ -39,11 +41,11 @@ flow_step_norm_mode="on" # auto: linear->off, geodesic->on
 flow_step_norm_type="expmap"   # l2 | expmap
 flow_hybrid_geodesic_steps="0" # 0=off; >0 => first s steps geodesic, remaining linear
 global_start_noise_std="0.0"
-# flow_path_type="linear"   # linear | geodesic
+flow_path_type="geodesic"   # linear | geodesic
 disable_delta=1
 disable_cond_gate=0
 flow_training_objective="flow_matching"    # "flow_matching", "start_end_mse"
-flow_block_type="${FLOW_BLOCK_TYPE:-film}"      # residual | film
+flow_block_type="${FLOW_BLOCK_TYPE:-residual}"      # residual | film
 flow_film_expansion="${FLOW_FILM_EXPANSION:-2}"     # used when flow_block_type=film
 
 extra_flow_args=(
@@ -115,6 +117,7 @@ CUDA_VISIBLE_DEVICES=${train_gpus} python -u src/main_fm.py \
     --lambda-ret "${lambda_ret}" \
     --name "${exp_name}" \
     --flow-num-steps 16 \
+    --train-clip-text-encoder \
     "${extra_flow_args[@]}"
 done
 done

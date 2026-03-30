@@ -30,7 +30,7 @@ import logging
 import torch.nn.functional as F
 from third_party.open_clip.clip import tokenize, _transform
 import pickle
-
+from third_party.open_clip import clip as open_clip
 from utils import is_master
 
 def unwrap_model(model):
@@ -182,6 +182,46 @@ def encode_pic2word_composed_feature(model, img2text, images, texts, args):
     )
     return composed_feature
 
+def _maybe_log_embedding_topk_tokens(nearest_ids, args):
+    if not getattr(args, "embedding_feature_log_words", False):
+        return
+
+    logged_batches = int(getattr(args, "_embedding_feature_logged_batches", 0))
+    max_batches = max(1, int(getattr(args, "embedding_feature_log_max_batches", 1)))
+    if logged_batches >= max_batches:
+        return
+
+    tokenizer = getattr(open_clip, "_tokenizer", None)
+    decoder = getattr(tokenizer, "decoder", None) if tokenizer is not None else None
+    if decoder is None:
+        logging.info("embedding_feature_log_words is enabled, but tokenizer decoder is unavailable.")
+        setattr(args, "_embedding_feature_logged_batches", logged_batches + 1)
+        return
+
+    topk_to_show = min(
+        nearest_ids.size(1),
+        max(1, int(getattr(args, "embedding_feature_log_topk", nearest_ids.size(1)))),
+    )
+    samples_to_show = min(
+        nearest_ids.size(0),
+        max(1, int(getattr(args, "embedding_feature_log_samples", 2))),
+    )
+
+    for sample_idx in range(samples_to_show):
+        token_ids = nearest_ids[sample_idx, :topk_to_show].detach().cpu().tolist()
+        token_strs = [
+            decoder.get(int(token_id), f"<id:{int(token_id)}>").replace("</w>", "").strip()
+            for token_id in token_ids
+        ]
+        logging.info(
+            "[EmbeddingTopK] sample=%d token_ids=%s tokens=%s",
+            sample_idx,
+            token_ids,
+            token_strs,
+        )
+
+    setattr(args, "_embedding_feature_logged_batches", logged_batches + 1)
+
 
 def encode_embedding_topk_feature(model, img2text, images, texts, args):
     """
@@ -220,6 +260,7 @@ def encode_embedding_topk_feature(model, img2text, images, texts, args):
     nearest_ids = torch.matmul(pseudo_norm, token_bank_norm.t()).topk(
         k=topk_text, dim=-1
     ).indices
+    _maybe_log_embedding_topk_tokens(nearest_ids, args)
     nearest_token_embeddings = token_bank[nearest_ids]
     query_image_tokens = tuple(
         nearest_token_embeddings[:, i, :] for i in range(topk_text)
