@@ -112,10 +112,23 @@ def should_use_qformer(args):
 
 def build_qformer(model, args):
     flow_embed_dim = getattr(model, "embed_dim", 1024)
+    text_token_dim = getattr(model, "transformer_width", None)
+    if text_token_dim is None and hasattr(model, "transformer") and hasattr(model.transformer, "width"):
+        text_token_dim = model.transformer.width
+    text_token_dim = text_token_dim or flow_embed_dim
+
+    image_token_dim = None
+    if hasattr(model, "visual"):
+        if hasattr(model.visual, "conv1") and hasattr(model.visual.conv1, "out_channels"):
+            image_token_dim = model.visual.conv1.out_channels
+        elif hasattr(model.visual, "class_embedding"):
+            image_token_dim = model.visual.class_embedding.shape[0]
+    image_token_dim = image_token_dim or flow_embed_dim
+
     return SingleQueryQFormer(
         dim=flow_embed_dim,
-        image_dim=model.transformer_width,
-        text_dim=model.transformer_width,
+        image_dim=image_token_dim,
+        text_dim=text_token_dim,
         num_layers=args.qformer_num_layers,
         num_heads=args.qformer_num_heads,
         mlp_ratio=args.qformer_mlp_ratio,
