@@ -405,14 +405,14 @@ def parse_args():
     parser.add_argument(
         "--global-flow-start-source",
         type=str,
-        choices=["text", "image", "inversion", "composed"],
+        choices=["text", "image", "inversion", "composed", "qformer"],
         default="text",
         help="Which feature to use as the start state of the global flow.",
     )
     parser.add_argument(
         "--global-flow-condition-source",
         type=str,
-        choices=["text", "image", "inversion", "composed"],
+        choices=["text", "image", "inversion", "composed", "qformer"],
         default="image",
         help="Which feature to use as the extra global flow condition when conditioning is enabled.",
     )
@@ -510,6 +510,60 @@ def parse_args():
         type=int,
         default=1,
         help="Maximum number of batches to print nearest-token logs for embedding features.",
+    )
+    parser.add_argument(
+        "--train-qformer",
+        action="store_true",
+        default=False,
+        help="If set, train Single-Query Q-Former parameters when qformer source is used.",
+    )
+    parser.add_argument(
+        "--qformer-num-layers",
+        type=int,
+        default=2,
+        help="Number of stacked Q-Former layers.",
+    )
+    parser.add_argument(
+        "--qformer-num-heads",
+        type=int,
+        default=8,
+        help="Attention heads per Q-Former layer.",
+    )
+    parser.add_argument(
+        "--qformer-mlp-ratio",
+        type=float,
+        default=4.0,
+        help="MLP expansion ratio in Q-Former feed-forward blocks.",
+    )
+    parser.add_argument(
+        "--qformer-dropout",
+        type=float,
+        default=0.1,
+        help="Dropout used in Q-Former cross-attention and MLP.",
+    )
+    parser.add_argument(
+        "--qformer-query-init-std",
+        type=float,
+        default=0.02,
+        help="Initialization std for the single learnable query token.",
+    )
+    parser.add_argument(
+        "--qformer-use-input-proj",
+        action="store_true",
+        default=False,
+        help="Enable linear projection from encoder token dims into flow token dim before Q-Former.",
+    )
+    parser.add_argument(
+        "--qformer-image-end-layer",
+        type=int,
+        default=-1,
+        help="Image token encoder depth used for Q-Former input (-1 means full depth).",
+    )
+    parser.add_argument(
+        "--qformer-text-end-layer",
+        type=int,
+        default=-1,
+        help="Text token encoder depth used for Q-Former input (-1 means full depth).",
     )
     parser.add_argument(
         "--global-flow-disable-cond-gate",

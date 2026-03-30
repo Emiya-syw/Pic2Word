@@ -1,9 +1,6 @@
 #!/bin/bash
 set -e
 
-# for flow_path_type in "geodesic"; do
-# for flow_condition_source in "image"; do
-# exp_name="fm_geodesic_text_image"
 exp_name="fm_geodesic_image_text_v2"
 
 gpu_id=0
@@ -21,16 +18,11 @@ lambda_ret="0.000"
 
 # -----------------------------
 # Global flow config
-# 你要的新版默认走：
-#   1) 不使用额外 condition
-#   2) 起点直接用 image+text 的 composed feature
-#   3) composed feature 优先走 pic2word 方式
-# 如果训练文本里没有 "*" 占位符，请把 compose_method 改成 add 或 mean。
 # -----------------------------
 flow_conditioning="enabled"
-flow_start_source="text"
-flow_condition_source="image"
-flow_compose_method="pic2word"
+flow_start_source="text"       # text | image | inversion | composed | qformer
+flow_condition_source="image"   # text | image | inversion | composed | qformer
+flow_compose_method="pic2word"  # add | mean | pic2word
 flow_pic2word_marker="*"
 flow_start_text_weight="1.0"
 flow_start_image_weight="1.0"
@@ -44,9 +36,23 @@ global_start_noise_std="0.0"
 flow_path_type="geodesic"   # linear | geodesic
 disable_delta=1
 disable_cond_gate=0
-flow_training_objective="flow_matching"    # "flow_matching", "start_end_mse"
+flow_training_objective="flow_matching"    # flow_matching | start_end_mse
 flow_block_type="${FLOW_BLOCK_TYPE:-residual}"      # residual | film
 flow_film_expansion="${FLOW_FILM_EXPANSION:-2}"     # used when flow_block_type=film
+
+# -----------------------------
+# Single-query Q-Former config
+# 仅当 start/condition source 任一为 qformer 时生效
+# -----------------------------
+train_qformer=1
+qformer_num_layers="2"
+qformer_num_heads="8"
+qformer_mlp_ratio="4.0"
+qformer_dropout="0.1"
+qformer_query_init_std="0.02"
+qformer_use_input_proj=0
+qformer_image_end_layer="-1"
+qformer_text_end_layer="-1"
 
 extra_flow_args=(
     --global-flow-conditioning "${flow_conditioning}"
@@ -77,7 +83,26 @@ if [ "${disable_cond_gate}" -eq 1 ]; then
     extra_flow_args+=(--global-flow-disable-cond-gate)
 fi
 
-# 仅新增：validation dataset 设置（配合 main_fm.py 每10 epoch自动跑 val loss）
+if [ "${flow_start_source}" = "qformer" ] || [ "${flow_condition_source}" = "qformer" ]; then
+    extra_flow_args+=(
+        --qformer-num-layers "${qformer_num_layers}"
+        --qformer-num-heads "${qformer_num_heads}"
+        --qformer-mlp-ratio "${qformer_mlp_ratio}"
+        --qformer-dropout "${qformer_dropout}"
+        --qformer-query-init-std "${qformer_query_init_std}"
+        --qformer-image-end-layer "${qformer_image_end_layer}"
+        --qformer-text-end-layer "${qformer_text_end_layer}"
+    )
+
+    if [ "${train_qformer}" -eq 1 ]; then
+        extra_flow_args+=(--train-qformer)
+    fi
+
+    if [ "${qformer_use_input_proj}" -eq 1 ]; then
+        extra_flow_args+=(--qformer-use-input-proj)
+    fi
+fi
+
 train_data_path="composed_image_retrieval/train.sh"
 val_data_path="composed_image_retrieval/val.sh"
 train_dataset_type="cc3m"
@@ -89,9 +114,13 @@ echo "Train to epoch ${target_epoch}"
 echo "Resume from: ${resume_path}"
 echo "Flow conditioning: ${flow_conditioning}"
 echo "Flow start source: ${flow_start_source}"
+echo "Flow condition source: ${flow_condition_source}"
 echo "Flow compose method: ${flow_compose_method}"
 echo "Flow path type: ${flow_path_type}"
 echo "Flow block type: ${flow_block_type} (film_expansion=${flow_film_expansion})"
+if [ "${flow_start_source}" = "qformer" ] || [ "${flow_condition_source}" = "qformer" ]; then
+    echo "Q-Former: layers=${qformer_num_layers}, heads=${qformer_num_heads}, train_qformer=${train_qformer}"
+fi
 echo "Loss weights: lambda_fm=${lambda_fm}, lambda_end=${lambda_end}, lambda_ret=${lambda_ret}"
 echo "Val data: ${val_data_path} (${val_dataset_type})"
 echo "=========================================="
@@ -119,5 +148,3 @@ CUDA_VISIBLE_DEVICES=${train_gpus} python -u src/main_fm.py \
     --flow-num-steps 16 \
     --train-clip-text-encoder \
     "${extra_flow_args[@]}"
-done
-done
