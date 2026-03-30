@@ -149,7 +149,8 @@ def encode_pic2word_composed_feature(model, img2text, images, texts, args):
     text_tokens = tokenize_to_device(texts, args)
     split_text = getattr(args, "global_flow_pic2word_marker", "*")
     split_token_id = tokenize([split_text])[0][1].item()
-    num_pic2word_tokens = max(1, int(getattr(args, "global_flow_pic2word_num_tokens", 1)))
+    pic2word_topk_text = max(0, int(getattr(args, "global_flow_pic2word_topk_text", 0)))
+    num_pic2word_tokens = max(1, pic2word_topk_text)
     text_tokens = _expand_pic2word_marker_slots(text_tokens, split_token_id, num_pic2word_tokens)
 
     if not torch.all((text_tokens == split_token_id).any(dim=1)):
@@ -159,10 +160,20 @@ def encode_pic2word_composed_feature(model, img2text, images, texts, args):
         )
 
     image_features = model.encode_image(images)
-    # image_features = _normalize_feature(image_features)
-    query_image_tokens = img2text(image_features)
-    if num_pic2word_tokens > 1:
-        query_image_tokens = tuple(query_image_tokens for _ in range(num_pic2word_tokens))
+    pseudo_word_embedding = img2text(image_features)
+    if pic2word_topk_text <= 0:
+        query_image_tokens = pseudo_word_embedding
+    else:
+        token_bank = model.token_embedding.weight.type(model.dtype)
+        pseudo_norm = F.normalize(pseudo_word_embedding.type(model.dtype), dim=-1)
+        token_bank_norm = F.normalize(token_bank, dim=-1)
+        nearest_ids = torch.matmul(pseudo_norm, token_bank_norm.t()).topk(
+            k=num_pic2word_tokens, dim=-1
+        ).indices
+        nearest_token_embeddings = token_bank[nearest_ids]
+        query_image_tokens = tuple(
+            nearest_token_embeddings[:, i, :] for i in range(num_pic2word_tokens)
+        )
     composed_feature = model.encode_text_img_retrieval(
         text_tokens,
         query_image_tokens,

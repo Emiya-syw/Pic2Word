@@ -463,6 +463,16 @@ def parse_args():
         ),
     )
     parser.add_argument(
+        "--global-flow-pic2word-topk-text",
+        type=int,
+        default=0,
+        help=(
+            "If 0, use one pseudo-word embedding from img2text to replace '*'. "
+            "If >0, expand '*' to top-k slots and replace them with nearest text-token embeddings "
+            "to the pseudo-word embedding."
+        ),
+    )
+    parser.add_argument(
         "--global-flow-disable-cond-gate",
         action="store_true",
         default=False,
@@ -513,6 +523,7 @@ def parse_args():
         args.flow_step_normalize = args.flow_path_type != "linear"
     args.flow_hybrid_geodesic_steps = max(0, int(args.flow_hybrid_geodesic_steps))
     args.global_flow_pic2word_num_tokens = max(1, int(args.global_flow_pic2word_num_tokens))
+    args.global_flow_pic2word_topk_text = max(0, int(args.global_flow_pic2word_topk_text))
     args.aggregate = not args.skip_aggregate
 
     # If some params are not passed, we use the default values based on model name.
