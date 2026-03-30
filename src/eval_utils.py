@@ -28,6 +28,7 @@ import sys
 import pdb
 import logging
 import torch.nn.functional as F
+from third_party.open_clip import clip as open_clip
 from third_party.open_clip.clip import tokenize, _transform
 import pickle
 
@@ -145,6 +146,47 @@ def _normalize_feature(x, eps=1e-6):
     return x / x.norm(dim=-1, keepdim=True).clamp(min=eps)
 
 
+def _maybe_log_embedding_topk_tokens(nearest_ids, args):
+    if not getattr(args, "embedding_feature_log_words", False):
+        return
+
+    logged_batches = int(getattr(args, "_embedding_feature_logged_batches", 0))
+    max_batches = max(1, int(getattr(args, "embedding_feature_log_max_batches", 1)))
+    if logged_batches >= max_batches:
+        return
+
+    tokenizer = getattr(open_clip, "_tokenizer", None)
+    decoder = getattr(tokenizer, "decoder", None) if tokenizer is not None else None
+    if decoder is None:
+        logging.info("embedding_feature_log_words is enabled, but tokenizer decoder is unavailable.")
+        setattr(args, "_embedding_feature_logged_batches", logged_batches + 1)
+        return
+
+    topk_to_show = min(
+        nearest_ids.size(1),
+        max(1, int(getattr(args, "embedding_feature_log_topk", nearest_ids.size(1)))),
+    )
+    samples_to_show = min(
+        nearest_ids.size(0),
+        max(1, int(getattr(args, "embedding_feature_log_samples", 2))),
+    )
+
+    for sample_idx in range(samples_to_show):
+        token_ids = nearest_ids[sample_idx, :topk_to_show].detach().cpu().tolist()
+        token_strs = [
+            decoder.get(int(token_id), f"<id:{int(token_id)}>").replace("</w>", "").strip()
+            for token_id in token_ids
+        ]
+        logging.info(
+            "[EmbeddingTopK] sample=%d token_ids=%s tokens=%s",
+            sample_idx,
+            token_ids,
+            token_strs,
+        )
+
+    setattr(args, "_embedding_feature_logged_batches", logged_batches + 1)
+
+
 def encode_pic2word_composed_feature(model, img2text, images, texts, args):
     text_tokens = tokenize_to_device(texts, args)
     split_text = getattr(args, "global_flow_pic2word_marker", "*")
@@ -181,6 +223,57 @@ def encode_pic2word_composed_feature(model, img2text, images, texts, args):
         repeat=False,
     )
     return composed_feature
+
+
+def encode_embedding_topk_feature(model, img2text, images, texts, args):
+    """
+    Build embedding feature by:
+      1) predicting pseudo word embedding from image,
+      2) selecting top-k nearest token embeddings from CLIP vocab,
+      3) replacing the marker token with these k embeddings,
+      4) encoding the composed text feature for retrieval.
+    """
+    text_tokens = tokenize_to_device(texts, args)
+    split_text = getattr(args, "global_flow_pic2word_marker", "*")
+    split_token_id = tokenize([split_text])[0][1].item()
+    topk_text = max(
+        1,
+        int(
+            getattr(
+                args,
+                "embedding_feature_topk_text",
+                getattr(args, "global_flow_pic2word_topk_text", 1),
+            )
+        ),
+    )
+    text_tokens = _expand_pic2word_marker_slots(text_tokens, split_token_id, topk_text)
+
+    if not torch.all((text_tokens == split_token_id).any(dim=1)):
+        raise ValueError(
+            "embedding feature requires every text prompt to "
+            f"contain the marker token {split_text!r}."
+        )
+
+    image_features = model.encode_image(images)
+    pseudo_word_embedding = img2text(image_features)
+    token_bank = model.token_embedding.weight.type(model.dtype)
+    pseudo_norm = F.normalize(pseudo_word_embedding.type(model.dtype), dim=-1)
+    token_bank_norm = F.normalize(token_bank, dim=-1)
+    nearest_ids = torch.matmul(pseudo_norm, token_bank_norm.t()).topk(
+        k=topk_text, dim=-1
+    ).indices
+    _maybe_log_embedding_topk_tokens(nearest_ids, args)
+    nearest_token_embeddings = token_bank[nearest_ids]
+    query_image_tokens = tuple(
+        nearest_token_embeddings[:, i, :] for i in range(topk_text)
+    )
+    embedding_feature = model.encode_text_img_retrieval(
+        text_tokens,
+        query_image_tokens,
+        split_ind=split_token_id,
+        repeat=False,
+    )
+    return embedding_feature
 
 
 def build_global_flow_feature(model, img2text, ref_images, texts, args, source, text_weight, image_weight):
@@ -797,6 +890,7 @@ def evaluate_cirr_fm(model, img2text, args, query_loader, target_loader, flow_ne
     all_image_features = []
     all_query_image_features = []
     all_composed_features = []
+    all_embedding_features = []
     all_flow_features = []
     all_mixture_features = []
     all_caption_features = []
@@ -843,6 +937,11 @@ def evaluate_cirr_fm(model, img2text, args, query_loader, target_loader, flow_ne
                 text_with_blank, query_image_tokens, split_ind=id_split, repeat=False
             )
             composed_feature = composed_feature / composed_feature.norm(dim=-1, keepdim=True)
+
+            embedding_feature = encode_embedding_topk_feature(
+                m, it, ref_images, text_with_blank, args
+            )
+            embedding_feature = embedding_feature / embedding_feature.norm(dim=-1, keepdim=True)
 
             mixture_features = query_image_features + caption_features
             mixture_features = mixture_features / mixture_features.norm(dim=-1, keepdim=True)
@@ -921,6 +1020,7 @@ def evaluate_cirr_fm(model, img2text, args, query_loader, target_loader, flow_ne
             all_caption_features.append(caption_features)
             all_query_image_features.append(query_image_features)
             all_composed_features.append(composed_feature)
+            all_embedding_features.append(embedding_feature)
             all_mixture_features.append(mixture_features)
 
         all_target_paths = np.array(all_target_paths)
@@ -937,6 +1037,7 @@ def evaluate_cirr_fm(model, img2text, args, query_loader, target_loader, flow_ne
 
         feats = {
             "composed": torch.cat(all_composed_features),
+            "embedding": torch.cat(all_embedding_features),
             "image": torch.cat(all_query_image_features),
             "text": torch.cat(all_caption_features),
             "mixture": torch.cat(all_mixture_features),
@@ -1245,6 +1346,7 @@ def evaluate_fashion_fm(model, img2text, args, source_loader, target_loader, flo
     all_image_features = []
     all_query_image_features = []
     all_composed_features = []
+    all_embedding_features = []
     all_flow_features = []
     all_caption_features = []
     all_mixture_features = []
@@ -1302,6 +1404,11 @@ def evaluate_fashion_fm(model, img2text, args, source_loader, target_loader, flo
                 target_caption, query_image_tokens, split_ind=id_split, repeat=False
             )
             composed_feature = composed_feature / composed_feature.norm(dim=-1, keepdim=True)
+
+            embedding_feature = encode_embedding_topk_feature(
+                m, it, ref_images, target_caption, args
+            )
+            embedding_feature = embedding_feature / embedding_feature.norm(dim=-1, keepdim=True)
 
             # mixture baseline
             query_image_features = query_image_features / query_image_features.norm(dim=-1, keepdim=True)
@@ -1387,6 +1494,7 @@ def evaluate_fashion_fm(model, img2text, args, source_loader, target_loader, flo
             all_caption_features.append(caption_features)
             all_query_image_features.append(query_image_features)
             all_composed_features.append(composed_feature)
+            all_embedding_features.append(embedding_feature)
             all_mixture_features.append(mixture_features)
 
         metric_func = partial(
@@ -1398,6 +1506,7 @@ def evaluate_fashion_fm(model, img2text, args, source_loader, target_loader, flo
 
         feats = {
             'composed': torch.cat(all_composed_features),
+            'embedding': torch.cat(all_embedding_features),
             'image': torch.cat(all_query_image_features),
             'text': torch.cat(all_caption_features),
             'mixture': torch.cat(all_mixture_features),
