@@ -252,6 +252,12 @@ def parse_args():
         action='store_true',
         help="Use the openai pretrained models.",
     )
+    parser.add_argument(
+        "--train-clip-text-encoder",
+        default=False,
+        action="store_true",
+        help="If set, unfreeze and train CLIP text encoder parameters together with img2text.",
+    )
     # arguments for distributed training
     parser.add_argument(
         "--dist-url",

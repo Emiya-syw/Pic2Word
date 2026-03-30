@@ -37,6 +37,20 @@ from logger import setup_primary_logging, setup_worker_logging
 from utils import is_master, convert_models_to_fp32
 import torchvision.transforms as T
 
+
+def is_clip_text_encoder_parameter(name):
+    if name.startswith("module."):
+        name = name[len("module."):]
+    text_encoder_prefixes = (
+        "token_embedding",
+        "transformer",
+        "ln_final",
+        "text_projection",
+        "positional_embedding",
+    )
+    return name.startswith(text_encoder_prefixes)
+
+
 def main_worker(gpu, ngpus_per_node, log_queue, args):
     args.gpu = gpu
     args.rank = gpu
@@ -129,6 +143,19 @@ def main_worker(gpu, ngpus_per_node, log_queue, args):
     exclude = lambda n : "bn" in n or "ln" in n or "bias" in n or 'logit_scale' in n
     include = lambda n : not exclude(n)
     named_parameters = list(img2text.named_parameters())
+    for p in model.parameters():
+        p.requires_grad = False
+    if args.train_clip_text_encoder:
+        for name, p in model.named_parameters():
+            if is_clip_text_encoder_parameter(name):
+                p.requires_grad = True
+        named_parameters.extend(
+            [
+                (f"clip.{name}", p)
+                for name, p in model.named_parameters()
+                if is_clip_text_encoder_parameter(name)
+            ]
+        )
     gain_or_bias_params = [p for n, p in named_parameters if exclude(n) and p.requires_grad]
     rest_params = [p for n, p in named_parameters if include(n) and p.requires_grad]
 
