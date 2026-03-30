@@ -198,10 +198,10 @@ def _maybe_log_embedding_topk_tokens(nearest_ids, args):
         setattr(args, "_embedding_feature_logged_batches", logged_batches + 1)
         return
 
-    topk_to_show = min(
-        nearest_ids.size(1),
-        max(1, int(getattr(args, "embedding_feature_log_topk", nearest_ids.size(1)))),
-    )
+    raw_log_topk = getattr(args, "embedding_feature_log_topk", None)
+    if raw_log_topk is None:
+        raw_log_topk = nearest_ids.size(1)
+    topk_to_show = min(nearest_ids.size(1), max(1, int(raw_log_topk)))
     samples_to_show = min(
         nearest_ids.size(0),
         max(1, int(getattr(args, "embedding_feature_log_samples", 2))),
@@ -234,16 +234,10 @@ def encode_embedding_topk_feature(model, img2text, images, texts, args):
     text_tokens = tokenize_to_device(texts, args)
     split_text = getattr(args, "global_flow_pic2word_marker", "*")
     split_token_id = tokenize([split_text])[0][1].item()
-    topk_text = max(
-        1,
-        int(
-            getattr(
-                args,
-                "embedding_feature_topk_text",
-                getattr(args, "global_flow_pic2word_topk_text", 1),
-            )
-        ),
-    )
+    embedding_topk_text = getattr(args, "embedding_feature_topk_text", None)
+    if embedding_topk_text is None:
+        embedding_topk_text = getattr(args, "global_flow_pic2word_topk_text", 1)
+    topk_text = max(1, int(embedding_topk_text))
     text_tokens = _expand_pic2word_marker_slots(text_tokens, split_token_id, topk_text)
 
     if not torch.all((text_tokens == split_token_id).any(dim=1)):
