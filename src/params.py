@@ -473,6 +473,42 @@ def parse_args():
         ),
     )
     parser.add_argument(
+        "--embedding-feature-topk-text",
+        type=int,
+        default=None,
+        help=(
+            "Top-k nearest vocabulary token embeddings used by embedding feature mode. "
+            "Defaults to --global-flow-pic2word-topk-text when not set."
+        ),
+    )
+    parser.add_argument(
+        "--embedding-feature-log-words",
+        action="store_true",
+        default=False,
+        help=(
+            "Log nearest vocabulary tokens for embedding features. "
+            "Useful for checking which words are closest to pseudo-word embeddings."
+        ),
+    )
+    parser.add_argument(
+        "--embedding-feature-log-topk",
+        type=int,
+        default=5,
+        help="How many nearest tokens to print per sample when --embedding-feature-log-words is enabled.",
+    )
+    parser.add_argument(
+        "--embedding-feature-log-samples",
+        type=int,
+        default=2,
+        help="How many samples to print per logged batch when --embedding-feature-log-words is enabled.",
+    )
+    parser.add_argument(
+        "--embedding-feature-log-max-batches",
+        type=int,
+        default=1,
+        help="Maximum number of batches to print nearest-token logs for embedding features.",
+    )
+    parser.add_argument(
         "--global-flow-disable-cond-gate",
         action="store_true",
         default=False,
@@ -524,6 +560,11 @@ def parse_args():
     args.flow_hybrid_geodesic_steps = max(0, int(args.flow_hybrid_geodesic_steps))
     args.global_flow_pic2word_num_tokens = max(1, int(args.global_flow_pic2word_num_tokens))
     args.global_flow_pic2word_topk_text = max(0, int(args.global_flow_pic2word_topk_text))
+    if args.embedding_feature_topk_text is not None:
+        args.embedding_feature_topk_text = max(1, int(args.embedding_feature_topk_text))
+    args.embedding_feature_log_topk = max(1, int(args.embedding_feature_log_topk))
+    args.embedding_feature_log_samples = max(1, int(args.embedding_feature_log_samples))
+    args.embedding_feature_log_max_batches = max(1, int(args.embedding_feature_log_max_batches))
     args.aggregate = not args.skip_aggregate
 
     # If some params are not passed, we use the default values based on model name.
