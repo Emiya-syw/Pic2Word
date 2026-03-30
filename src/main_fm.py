@@ -48,6 +48,7 @@ from utils import is_master, convert_models_to_fp32
 # ===== Flow Matching =====
 from model.residual_flow_matching_module import ConditionalFlowNet
 from model.flow_matching_loss import FlowMatchingLoss
+from model.single_query_qformer import SingleQueryQFormer
 
 
 def unwrap_model(model):
@@ -99,6 +100,30 @@ def build_img2text(model, args):
     return img2text
 
 
+
+
+def should_use_qformer(args):
+    sources = [
+        getattr(args, "global_flow_start_source", "text"),
+        getattr(args, "global_flow_condition_source", "image"),
+    ]
+    return any(src == "qformer" for src in sources)
+
+
+def build_qformer(model, args):
+    flow_embed_dim = getattr(model, "embed_dim", 1024)
+    return SingleQueryQFormer(
+        dim=flow_embed_dim,
+        image_dim=model.transformer_width,
+        text_dim=model.transformer_width,
+        num_layers=args.qformer_num_layers,
+        num_heads=args.qformer_num_heads,
+        mlp_ratio=args.qformer_mlp_ratio,
+        dropout=args.qformer_dropout,
+        query_init_std=args.qformer_query_init_std,
+        use_input_proj=args.qformer_use_input_proj,
+    )
+
 def get_model_device(args):
     if torch.cuda.is_available() and args.gpu is not None:
         return torch.device(f"cuda:{args.gpu}")
@@ -118,7 +143,7 @@ def maybe_strip_module_prefix(state_dict):
     return state_dict
 
 
-def save_checkpoint(epoch, args, model, img2text, flow_net, optimizer, scaler=None, extra=None):
+def save_checkpoint(epoch, args, model, img2text, flow_net, optimizer, scaler=None, extra=None, qformer=None):
     """
     Save checkpoint.
     Even if model / img2text are frozen, still save them for reproducibility and resume.
@@ -129,6 +154,7 @@ def save_checkpoint(epoch, args, model, img2text, flow_net, optimizer, scaler=No
         "state_dict": unwrap_model(model).state_dict(),
         "state_dict_img2text": unwrap_model(img2text).state_dict(),
         "state_dict_flow_net": unwrap_model(flow_net).state_dict(),
+        "state_dict_qformer": unwrap_model(qformer).state_dict() if qformer is not None else None,
         "optimizer": optimizer.state_dict() if optimizer is not None else None,
         "scaler": scaler.state_dict() if scaler is not None else None,
     }
@@ -230,6 +256,8 @@ def main_worker(gpu, ngpus_per_node, log_queue, args):
     # --------------------------------------------------
     img2text = build_img2text(model, args)
 
+    qformer = build_qformer(model, args) if should_use_qformer(args) else None
+
     # --------------------------------------------------
     # 3. Flow net
     # Only this module is optimized
@@ -256,6 +284,11 @@ def main_worker(gpu, ngpus_per_node, log_queue, args):
         unfreeze_module(img2text)
     else:
         freeze_module(img2text)
+    if qformer is not None:
+        if args.train_qformer:
+            unfreeze_module(qformer)
+        else:
+            freeze_module(qformer)
     # flow_net stays trainable
 
     # --------------------------------------------------
@@ -265,10 +298,14 @@ def main_worker(gpu, ngpus_per_node, log_queue, args):
         convert_models_to_fp32(model)
         convert_models_to_fp32(img2text)
         convert_models_to_fp32(flow_net)
+        if qformer is not None:
+            convert_models_to_fp32(qformer)
 
     model.to(device)
     img2text.to(device)
     flow_net.to(device)
+    if qformer is not None:
+        qformer.to(device)
 
     if device.type == "cpu":
         logging.warning("Using CPU, this will be slow.")
@@ -277,6 +314,8 @@ def main_worker(gpu, ngpus_per_node, log_queue, args):
             convert_weights(model)
             convert_weights(img2text)
             convert_weights(flow_net)
+            if qformer is not None:
+                convert_weights(qformer)
 
         if args.distributed and args.use_bn_sync:
             model = torch.nn.SyncBatchNorm.convert_sync_batchnorm(model)
@@ -293,6 +332,8 @@ def main_worker(gpu, ngpus_per_node, log_queue, args):
             model = torch.nn.DataParallel(model, device_ids=args.multigpu)
             img2text = torch.nn.DataParallel(img2text, device_ids=args.multigpu)
             flow_net = torch.nn.DataParallel(flow_net, device_ids=args.multigpu)
+            if qformer is not None:
+                qformer = torch.nn.DataParallel(qformer, device_ids=args.multigpu)
 
     # --------------------------------------------------
     # 6. Data
@@ -332,6 +373,10 @@ def main_worker(gpu, ngpus_per_node, log_queue, args):
     if args.train_img2text:
         named_parameters.extend(
             [(f"img2text.{n}", p) for n, p in unwrap_model(img2text).named_parameters()]
+        )
+    if qformer is not None and args.train_qformer:
+        named_parameters.extend(
+            [(f"qformer.{n}", p) for n, p in unwrap_model(qformer).named_parameters()]
         )
     gain_or_bias_params = [p for n, p in named_parameters if exclude(n) and p.requires_grad]
     rest_params = [p for n, p in named_parameters if include(n) and p.requires_grad]
@@ -432,6 +477,13 @@ def main_worker(gpu, ngpus_per_node, log_queue, args):
                     name="flow_net",
                     strict=True,
                 )
+                if qformer is not None and checkpoint.get("state_dict_qformer", None) is not None:
+                    safe_load_module(
+                        unwrap_model(qformer),
+                        checkpoint["state_dict_qformer"],
+                        name="qformer",
+                        strict=True,
+                    )
 
                 # Only resume epoch when flow_net exists
                 start_epoch = checkpoint.get("epoch", 0)
@@ -501,6 +553,8 @@ def main_worker(gpu, ngpus_per_node, log_queue, args):
 
         if args.debug:
             wandb.watch(unwrap_model(flow_net), log="all")
+            if qformer is not None and args.train_qformer:
+                wandb.watch(unwrap_model(qformer), log="all")
 
         if params_file is not None and os.path.isfile(params_file):
             wandb.save(params_file)
@@ -518,11 +572,14 @@ def main_worker(gpu, ngpus_per_node, log_queue, args):
         unwrap_model(model).eval()
         unwrap_model(img2text).eval()
         unwrap_model(flow_net).train()
+        if qformer is not None and args.train_qformer:
+            unwrap_model(qformer).train()
 
         train(
             model=model,
             img2text=img2text,
             flow_net=flow_net,
+            qformer=qformer,
             criterion=criterion,
             data=data,
             epoch=epoch,
@@ -538,6 +595,7 @@ def main_worker(gpu, ngpus_per_node, log_queue, args):
                 model=model,
                 img2text=img2text,
                 flow_net=flow_net,
+                qformer=qformer,
                 criterion=criterion,
                 data=data,
                 epoch=epoch + 1,
@@ -549,6 +607,8 @@ def main_worker(gpu, ngpus_per_node, log_queue, args):
             unwrap_model(model).eval()
             unwrap_model(img2text).eval()
             unwrap_model(flow_net).train()
+        if qformer is not None and args.train_qformer:
+            unwrap_model(qformer).train()
 
         if args.save_logs and (args.gpu == 0 or (not args.distributed)):
             ckpt = save_checkpoint(
@@ -558,6 +618,7 @@ def main_worker(gpu, ngpus_per_node, log_queue, args):
                 img2text=img2text,
                 flow_net=flow_net,
                 optimizer=optimizer,
+                qformer=qformer,
                 scaler=scaler,
             )
 

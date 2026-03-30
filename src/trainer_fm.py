@@ -137,6 +137,18 @@ def encode_image_via_img2text(model, img2text, images, args):
     return text_features
 
 
+
+
+def encode_qformer_feature(model, qformer, ref_images, texts, args):
+    if qformer is None:
+        raise ValueError("qformer source requested but qformer module is None.")
+
+    tokens = tokenize_to_device(texts, args)
+    text_mask = tokens != 0
+    image_tokens = model.encode_image_tokens(ref_images, end_layer=args.qformer_image_end_layer)
+    text_tokens = model.encode_text_tokens(tokens, end_layer=args.qformer_text_end_layer)
+    return qformer(image_tokens=image_tokens, text_tokens=text_tokens, text_mask=text_mask)
+
 def _expand_pic2word_marker_slots(text_tokens, marker_token_id, num_slots):
     if num_slots <= 1:
         return text_tokens
@@ -227,7 +239,7 @@ def encode_pic2word_composed_feature(model, img2text, images, texts, args):
     return composed_feature
 
 
-def build_global_flow_feature(model, img2text, ref_images, texts, args, source, text_weight, image_weight):
+def build_global_flow_feature(model, img2text, qformer, ref_images, texts, args, source, text_weight, image_weight):
     source = source.lower()
     if source == "text":
         feature = encode_text_batch(model, texts, args)
@@ -235,6 +247,8 @@ def build_global_flow_feature(model, img2text, ref_images, texts, args, source, 
         feature = encode_image_batch(model, ref_images, args)
     elif source == "inversion":
         feature = encode_image_via_img2text(model, img2text, ref_images, args)
+    elif source == "qformer":
+        feature = encode_qformer_feature(model, qformer, ref_images, texts, args)
     elif source == "composed":
         compose_method = getattr(args, "global_flow_compose_method", "add").lower()
         if compose_method == "pic2word":
@@ -371,7 +385,7 @@ def parse_val_batch_for_flow(batch):
     raise TypeError(f"Unsupported validation batch type: {type(batch)}")
 
 
-def validate(model, img2text, flow_net, criterion, data, epoch, args, writer=None):
+def validate(model, img2text, flow_net, qformer, criterion, data, epoch, args, writer=None):
     if "val" not in data:
         return None
 
@@ -387,6 +401,7 @@ def validate(model, img2text, flow_net, criterion, data, epoch, args, writer=Non
     m = unwrap_model(model)
     it = unwrap_model(img2text)
     flow = unwrap_model(flow_net)
+    qf = unwrap_model(qformer) if qformer is not None else None
 
     m.eval()
     it.eval()
@@ -426,6 +441,7 @@ def validate(model, img2text, flow_net, criterion, data, epoch, args, writer=Non
             q = build_global_flow_feature(
                 model=m,
                 img2text=it,
+                qformer=qf,
                 ref_images=ref_images,
                 texts=mod_texts,
                 args=args,
@@ -439,6 +455,7 @@ def validate(model, img2text, flow_net, criterion, data, epoch, args, writer=Non
                 e_m = build_global_flow_feature(
                     model=m,
                     img2text=it,
+                    qformer=qf,
                     ref_images=ref_images,
                     texts=mod_texts,
                     args=args,
@@ -515,7 +532,7 @@ def validate(model, img2text, flow_net, criterion, data, epoch, args, writer=Non
     return val_metrics
 
 
-def train(model, img2text, flow_net, criterion, data, epoch, optimizer, scaler, scheduler, args, writer=None):
+def train(model, img2text, flow_net, qformer, criterion, data, epoch, optimizer, scaler, scheduler, args, writer=None):
     os.environ["WDS_EPOCH"] = str(epoch)
 
     # frozen modules
@@ -563,6 +580,7 @@ def train(model, img2text, flow_net, criterion, data, epoch, optimizer, scaler, 
 
         m = unwrap_model(model)
         it = unwrap_model(img2text)
+        qf = unwrap_model(qformer) if qformer is not None else None
 
         # --------------------------------------------------
         # 2. encode features
@@ -571,13 +589,15 @@ def train(model, img2text, flow_net, criterion, data, epoch, optimizer, scaler, 
         # e_m : optional configurable condition embedding
         # y   : target/generated caption -> text encoder
         # --------------------------------------------------
-        feature_ctx = contextlib.nullcontext() if getattr(args, "train_img2text", False) else torch.no_grad()
+        should_train_features = getattr(args, "train_img2text", False) or (qformer is not None and getattr(args, "train_qformer", False))
+        feature_ctx = contextlib.nullcontext() if should_train_features else torch.no_grad()
         with feature_ctx:
             if args.loss_type != "global":
                 raise ValueError(f"Unsupported loss_type: {args.loss_type}")
             q = build_global_flow_feature(
                 model=m,
                 img2text=it,
+                qformer=qf,
                 ref_images=ref_images,
                 texts=mod_texts,
                 args=args,
@@ -591,6 +611,7 @@ def train(model, img2text, flow_net, criterion, data, epoch, optimizer, scaler, 
                 e_m = build_global_flow_feature(
                     model=m,
                     img2text=it,
+                    qformer=qf,
                     ref_images=ref_images,
                     texts=mod_texts,
                     args=args,
