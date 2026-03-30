@@ -493,8 +493,11 @@ def parse_args():
     parser.add_argument(
         "--embedding-feature-log-topk",
         type=int,
-        default=5,
-        help="How many nearest tokens to print per sample when --embedding-feature-log-words is enabled.",
+        default=None,
+        help=(
+            "How many nearest tokens to print per sample when --embedding-feature-log-words is enabled. "
+            "Defaults to --embedding-feature-topk-text (or computed top-k) when not set."
+        ),
     )
     parser.add_argument(
         "--embedding-feature-log-samples",
@@ -562,7 +565,10 @@ def parse_args():
     args.global_flow_pic2word_topk_text = max(0, int(args.global_flow_pic2word_topk_text))
     if args.embedding_feature_topk_text is not None:
         args.embedding_feature_topk_text = max(1, int(args.embedding_feature_topk_text))
-    args.embedding_feature_log_topk = max(1, int(args.embedding_feature_log_topk))
+        # If users explicitly request embedding top-k tokens, default to showing token logs as well.
+        args.embedding_feature_log_words = True
+    if args.embedding_feature_log_topk is not None:
+        args.embedding_feature_log_topk = max(1, int(args.embedding_feature_log_topk))
     args.embedding_feature_log_samples = max(1, int(args.embedding_feature_log_samples))
     args.embedding_feature_log_max_batches = max(1, int(args.embedding_feature_log_max_batches))
     args.aggregate = not args.skip_aggregate

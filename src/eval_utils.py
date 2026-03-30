@@ -198,10 +198,10 @@ def _maybe_log_embedding_topk_tokens(nearest_ids, args):
         setattr(args, "_embedding_feature_logged_batches", logged_batches + 1)
         return
 
-    topk_to_show = min(
-        nearest_ids.size(1),
-        max(1, int(getattr(args, "embedding_feature_log_topk", nearest_ids.size(1)))),
-    )
+    raw_log_topk = getattr(args, "embedding_feature_log_topk", None)
+    if raw_log_topk is None:
+        raw_log_topk = nearest_ids.size(1)
+    topk_to_show = min(nearest_ids.size(1), max(1, int(raw_log_topk)))
     samples_to_show = min(
         nearest_ids.size(0),
         max(1, int(getattr(args, "embedding_feature_log_samples", 2))),
