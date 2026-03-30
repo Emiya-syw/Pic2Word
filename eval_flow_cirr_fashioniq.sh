@@ -8,15 +8,15 @@ set -euo pipefail
 
 GPU_ID="${GPU_ID:-0}"
 CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-0,1,2,3,4,5,6,7}"
-RESUME="${RESUME:-/home/sunyw/CIR/Pic2Word/logs/fm_composed_geodesic_pure/checkpoints/epoch_7.pt}"
+RESUME="${RESUME:-/home/sunyw/CIR/Pic2Word/logs/fm_composed_geodesic_image_cond_v_gate_exp_film/checkpoints/epoch_10.pt}"
 MODEL_NAME="${MODEL_NAME:-ViT-L/14}"
 LOSS_TYPE="${LOSS_TYPE:-global}"
 EVAL_CIRR_TEST="${EVAL_CIRR_TEST:-0}"  # 1 => additionally run CIRR test split
 EVAL_CSV_PATH="${EVAL_CSV_PATH:-./logs/eval_flow_metrics.csv}"
 
 # Global flow config (kept aligned with existing fashioniq.sh defaults)
-flow_conditioning="${FLOW_CONDITIONING:-disabled}"
-flow_start_source="${FLOW_START_SOURCE:-composed}"
+flow_conditioning="${FLOW_CONDITIONING:-enabled}"
+flow_start_source="${FLOW_START_SOURCE:-text}"
 flow_condition_source="${FLOW_CONDITION_SOURCE:-image}"
 flow_compose_method="${FLOW_COMPOSE_METHOD:-pic2word}"
 flow_pic2word_marker="${FLOW_PIC2WORD_MARKER:-*}"
@@ -28,11 +28,11 @@ global_start_noise_std="${GLOBAL_START_NOISE_STD:-0.0}"
 flow_path_type="${FLOW_PATH_TYPE:-linear}" # linear | geodesic
 flow_geodesic_eps="${FLOW_GEODESIC_EPS:-1e-4}"
 flow_step_norm_mode="${FLOW_STEP_NORM_MODE:-on}" # on | off | auto
-flow_step_norm_type="${FLOW_STEP_NORM_TYPE:-l2}" # l2 | expmap
+flow_step_norm_type="${FLOW_STEP_NORM_TYPE:-expmap}" # l2 | expmap
 flow_hybrid_geodesic_steps="${FLOW_HYBRID_GEODESIC_STEPS:-0}"
 disable_delta="${DISABLE_DELTA:-1}" # match your training script default
 disable_cond_gate="${DISABLE_COND_GATE:-0}"
-flow_block_type="${FLOW_BLOCK_TYPE:-residual}"       # residual | film
+flow_block_type="${FLOW_BLOCK_TYPE:-film}"       # residual | film
 flow_film_expansion="${FLOW_FILM_EXPANSION:-2}"      # used when FLOW_BLOCK_TYPE=film
 
 extra_flow_args=(

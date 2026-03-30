@@ -233,8 +233,8 @@ class FlowMatchingLoss(nn.Module):
             # Ablation: remove flow-matching target; directly regress start->end.
             t0 = torch.zeros(B, 1, device=device, dtype=dtype)
             y_hat = self._flow_net_call(q, q, e_m, t0)
-            loss_fm = torch.zeros((), device=device, dtype=dtype)
-            loss_end = F.mse_loss(y_hat, y)
+            loss_end = torch.zeros((), device=device, dtype=dtype)
+            loss_fm = F.mse_loss(y_hat, y)
         else:
             raise ValueError(f"Unsupported training_objective: {self.training_objective}")
         # mse_end = F.mse_loss(y_hat, y)

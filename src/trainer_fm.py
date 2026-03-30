@@ -167,7 +167,7 @@ def encode_pic2word_composed_feature(model, img2text, images, texts, args):
         )
 
     image_features = model.encode_image(images)
-    image_features = _normalize_feature(image_features)
+    # image_features = _normalize_feature(image_features)
     query_image_tokens = img2text(image_features)
     composed_feature = model.encode_text_img_retrieval(
         text_tokens,

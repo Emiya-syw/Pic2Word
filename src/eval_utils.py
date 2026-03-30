@@ -124,7 +124,7 @@ def encode_pic2word_composed_feature(model, img2text, images, texts, args):
         )
 
     image_features = model.encode_image(images)
-    image_features = _normalize_feature(image_features)
+    # image_features = _normalize_feature(image_features)
     query_image_tokens = img2text(image_features)
     composed_feature = model.encode_text_img_retrieval(
         text_tokens,
@@ -397,116 +397,7 @@ def sequence_flow_matching_inference(
 
     return x_t
     
-# def l2norm(x, dim=-1, eps=1e-6):
-#     return x / x.norm(dim=dim, keepdim=True).clamp(min=eps)
 
-
-# def project_to_tangent(x, v):
-#     """
-#     Project v onto the tangent space at x on the unit sphere.
-#     x, v: [B, D]
-#     """
-#     return v - (x * v).sum(dim=-1, keepdim=True) * x
-
-
-# def flow_matching_inference(flow_net, q, e_m, num_steps=8, normalize_input=True):
-#     """
-#     Geometry-aware inference on the unit sphere.
-
-#     Assumes the flow net is called as:
-#         flow_net(x_t, delta_t, e_m, t)
-#     where:
-#         delta_t = x_t - x_0
-
-#     Updates use tangent projection + renormalization:
-#         v_tan = Proj_{T_x}(v)
-#         x_{k+1} = Normalize(x_k + dt * v_tan)
-#     """
-#     if normalize_input:
-#         q = l2norm(q)
-#         e_m = l2norm(e_m)
-
-#     x_t = q.clone()
-#     x0 = q.clone()
-
-#     B = q.size(0)
-#     dt = 1.0 / num_steps
-
-#     for k in range(num_steps):
-#         t = torch.full(
-#             (B, 1),
-#             k / num_steps,
-#             device=q.device,
-#             dtype=q.dtype,
-#         )
-
-#         delta_t = x_t - x0
-#         v = flow_net(x_t, delta_t, e_m, t)
-
-#         # geometry-aware step: tangent projection + renorm
-#         v = project_to_tangent(x_t, v)
-#         x_t = x_t + dt * v
-#         x_t = l2norm(x_t)
-
-#     return x_t
-
-# def _call_flow_net(flow_net, x_t, q, e_m, t):
-#     """
-#     flow_net signature:
-#         forward(self, x_t, q, e_m, t)
-
-#     Args:
-#         x_t: [B, D]
-#         q:   [B, D]
-#         e_m: [B, D]
-#         t:   [B, 1]
-#     """
-#     out = flow_net(x_t, q, e_m, t)
-
-#     if isinstance(out, dict):
-#         if "pred" in out:
-#             out = out["pred"]
-#         elif "velocity" in out:
-#             out = out["velocity"]
-#         elif "v" in out:
-#             out = out["v"]
-#         else:
-#             raise ValueError(f"Unsupported flow_net dict output keys: {list(out.keys())}")
-
-#     return out
-
-
-# def flow_matching_inference(flow_net, q, e_m, num_steps=4):
-#     """
-#     Euler integration from t=0 to t=1.
-
-#     Since the flow net is trained as:
-#         v_theta(x_t, q, e_m, t)
-
-#     we start from:
-#         x_0 = q
-
-#     and integrate:
-#         x_{k+1} = x_k + dt * v_theta(x_k, q, e_m, t_k)
-#     """
-#     x_t = q
-#     B = q.size(0)
-#     dt = 1.0 / num_steps
-
-#     for k in range(num_steps):
-#         # flow_net expects [B, 1]
-#         t = torch.full(
-#             (B, 1),
-#             (k + 0.5) / num_steps,
-#             device=q.device,
-#             dtype=q.dtype,
-#         )
-
-#         v = _call_flow_net(flow_net, x_t, q, e_m, t)
-#         x_t = x_t + dt * v
-
-#     x_t = x_t / x_t.norm(dim=-1, keepdim=True).clamp(min=1e-6)
-#     return x_t
 
 def prepare_img(img_file, transform):
     return transform(Image.open(img_file))
@@ -1351,7 +1242,7 @@ def evaluate_fashion_fm(model, img2text, args, source_loader, target_loader, flo
 
             # ref image feature
             query_image_features = m.encode_image(ref_images)
-            query_image_features = query_image_features / query_image_features.norm(dim=-1, keepdim=True)
+            
 
             # old composed baseline
             id_split = tokenize(["*"])[0][1]
@@ -1365,6 +1256,7 @@ def evaluate_fashion_fm(model, img2text, args, source_loader, target_loader, flo
             composed_feature = composed_feature / composed_feature.norm(dim=-1, keepdim=True)
 
             # mixture baseline
+            query_image_features = query_image_features / query_image_features.norm(dim=-1, keepdim=True)
             mixture_features = query_image_features + caption_features
             mixture_features = mixture_features / mixture_features.norm(dim=-1, keepdim=True)
 

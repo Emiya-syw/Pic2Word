@@ -2,8 +2,8 @@
 set -e
 
 for flow_path_type in "geodesic"; do
-for flow_condition_source in "inversion" "image"; do
-exp_name="fm_composed_${flow_path_type}_${flow_condition_source}_cond_v_gate_exp_film"
+for flow_condition_source in "image"; do
+exp_name="fm_composed_${flow_path_type}_${flow_condition_source}2"
 gpu_id=0
 train_gpus="0,1,2,3,4,5,6,7"
 
@@ -26,7 +26,7 @@ lambda_ret="0.0002"
 # 如果训练文本里没有 "*" 占位符，请把 compose_method 改成 add 或 mean。
 # -----------------------------
 flow_conditioning="enabled"
-flow_start_source="text"
+flow_start_source="composed"
 # flow_condition_source="inversion"
 flow_compose_method="pic2word"
 flow_pic2word_marker="*"
@@ -42,6 +42,7 @@ global_start_noise_std="0.0"
 # flow_path_type="linear"   # linear | geodesic
 disable_delta=1
 disable_cond_gate=0
+flow_training_objective="flow_matching"    # "flow_matching", "start_end_mse"
 flow_block_type="${FLOW_BLOCK_TYPE:-film}"      # residual | film
 flow_film_expansion="${FLOW_FILM_EXPANSION:-2}"     # used when flow_block_type=film
 
@@ -63,6 +64,7 @@ extra_flow_args=(
     --global-start-noise-std "${global_start_noise_std}"
     --global-flow-block-type "${flow_block_type}"
     --global-flow-film-expansion "${flow_film_expansion}"
+    --flow-training-objective "${flow_training_objective}"
 )
 
 if [ "${disable_delta}" -eq 1 ]; then
