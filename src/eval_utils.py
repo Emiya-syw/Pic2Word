@@ -267,12 +267,21 @@ def encode_embedding_topk_feature(model, img2text, images, texts, args):
     )
     return embedding_feature
 
-
+def encode_image_batch(model, images, args):
+    """
+    Standard text encoding with CLIP text encoder.
+    texts -> token ids -> text features
+    """
+    image_features = model.encode_image(images)
+    return image_features
+    
 def build_global_flow_feature(model, img2text, ref_images, texts, args, source, text_weight, image_weight):
     source = source.lower()
     if source == "text":
         feature = encode_text_batch(model, texts, args)
-    elif source in ("image", "inversion"):
+    elif source == "image":
+        feature = encode_image_batch(model, ref_images, args)
+    elif source == "inversion":
         feature = encode_image_via_img2text(model, img2text, ref_images, args)
     elif source == "composed":
         compose_method = getattr(args, "global_flow_compose_method", "add").lower()

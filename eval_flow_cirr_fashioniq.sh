@@ -53,7 +53,9 @@ extra_flow_args=(
   --flow-hybrid-geodesic-steps "${flow_hybrid_geodesic_steps}"
   --global-flow-block-type "${flow_block_type}"
   --global-flow-film-expansion "${flow_film_expansion}"
-  --global-flow-pic2word-topk-text "2"
+  --global-flow-pic2word-topk-text "0"
+  --embedding-feature-topk-text "5"
+  --embedding-feature-log-max-batches "10"
 )
 
 if [[ "${disable_delta}" == "1" ]]; then
