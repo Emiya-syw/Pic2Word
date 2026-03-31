@@ -200,6 +200,15 @@ def _sphere_expmap_step(x, v, dt, eps=1e-6):
     x_next = torch.cos(theta) * x_unit + torch.sin(theta) * direction
     return _normalize_feature(x_next, eps=eps)
 
+def _bidirectional_contrastive_loss(anchor, positive, temperature=0.07):
+    anchor = _normalize_feature(anchor)
+    positive = _normalize_feature(positive)
+    logits = anchor @ positive.t() / max(float(temperature), 1e-6)
+    labels = torch.arange(anchor.size(0), device=anchor.device)
+    loss_a2p = F.cross_entropy(logits, labels)
+    loss_p2a = F.cross_entropy(logits.t(), labels)
+    return 0.5 * (loss_a2p + loss_p2a)
+
 
 def encode_pic2word_composed_feature(model, img2text, images, texts, args):
     text_tokens = tokenize_to_device(texts, args)
@@ -239,7 +248,18 @@ def encode_pic2word_composed_feature(model, img2text, images, texts, args):
     return composed_feature
 
 
-def build_global_flow_feature(model, img2text, qformer, ref_images, texts, args, source, text_weight, image_weight):
+def build_global_flow_feature(
+    model,
+    img2text,
+    qformer,
+    ref_images,
+    texts,
+    args,
+    source,
+    text_weight,
+    image_weight,
+    precomputed_qformer_feature=None,
+):
     source = source.lower()
     if source == "text":
         feature = encode_text_batch(model, texts, args)
@@ -248,7 +268,10 @@ def build_global_flow_feature(model, img2text, qformer, ref_images, texts, args,
     elif source == "inversion":
         feature = encode_image_via_img2text(model, img2text, ref_images, args)
     elif source == "qformer":
-        feature = encode_qformer_feature(model, qformer, ref_images, texts, args)
+        if precomputed_qformer_feature is not None:
+            feature = precomputed_qformer_feature
+        else:
+            feature = encode_qformer_feature(model, qformer, ref_images, texts, args)
     elif source == "composed":
         compose_method = getattr(args, "global_flow_compose_method", "add").lower()
         if compose_method == "pic2word":
@@ -594,6 +617,26 @@ def train(model, img2text, flow_net, qformer, criterion, data, epoch, optimizer,
         with feature_ctx:
             if args.loss_type != "global":
                 raise ValueError(f"Unsupported loss_type: {args.loss_type}")
+            start_source = getattr(args, "global_flow_start_source", "text")
+            condition_source = getattr(args, "global_flow_condition_source", "image")
+            need_qformer_feature = (
+                qf is not None
+                and (
+                    getattr(args, "lambda_qformer_mod_ret", 0.0) > 0
+                    or start_source.lower() == "qformer"
+                    or condition_source.lower() == "qformer"
+                )
+            )
+            shared_qformer_feature = None
+            if need_qformer_feature:
+                shared_qformer_feature = encode_qformer_feature(
+                    model=m,
+                    qformer=qf,
+                    ref_images=ref_images,
+                    texts=mod_texts,
+                    args=args,
+                )
+
             q = build_global_flow_feature(
                 model=m,
                 img2text=it,
@@ -601,9 +644,10 @@ def train(model, img2text, flow_net, qformer, criterion, data, epoch, optimizer,
                 ref_images=ref_images,
                 texts=mod_texts,
                 args=args,
-                source=getattr(args, "global_flow_start_source", "text"),
+                source=start_source,
                 text_weight=getattr(args, "global_flow_start_text_weight", 1.0),
                 image_weight=getattr(args, "global_flow_start_image_weight", 1.0),
+                precomputed_qformer_feature=shared_qformer_feature,
             )
             use_condition = getattr(args, "global_flow_conditioning", "enabled") == "enabled"
             e_m = None
@@ -615,9 +659,10 @@ def train(model, img2text, flow_net, qformer, criterion, data, epoch, optimizer,
                     ref_images=ref_images,
                     texts=mod_texts,
                     args=args,
-                    source=getattr(args, "global_flow_condition_source", "image"),
+                    source=condition_source,
                     text_weight=getattr(args, "global_flow_condition_text_weight", 1.0),
                     image_weight=getattr(args, "global_flow_condition_image_weight", 1.0),
+                    precomputed_qformer_feature=shared_qformer_feature,
                 )
             y = encode_text_batch(m, target_texts, args)
 
@@ -627,6 +672,15 @@ def train(model, img2text, flow_net, qformer, criterion, data, epoch, optimizer,
             if e_m is not None:
                 e_m = _normalize_feature(e_m)
 
+            loss_qformer_mod_ret = torch.zeros((), device=q.device, dtype=q.dtype)
+            if qf is not None and getattr(args, "lambda_qformer_mod_ret", 0.0) > 0:
+                mod_text_feature = encode_text_batch(m, mod_texts, args)
+                loss_qformer_mod_ret = _bidirectional_contrastive_loss(
+                    shared_qformer_feature,
+                    mod_text_feature,
+                    temperature=getattr(args, "qformer_mod_ret_temperature", 0.07),
+                )
+
         # --------------------------------------------------
         # 3. flow matching loss
         # --------------------------------------------------
@@ -635,7 +689,7 @@ def train(model, img2text, flow_net, qformer, criterion, data, epoch, optimizer,
                 if args.loss_type != "global":
                     raise ValueError(f"Unsupported loss_type: {args.loss_type}")
                 loss_dict = criterion(q, y, e_m)
-                total_loss = loss_dict["loss"]
+                total_loss = loss_dict["loss"] + getattr(args, "lambda_qformer_mod_ret", 0.0) * loss_qformer_mod_ret
 
             scaler.scale(total_loss).backward()
             scaler.step(optimizer)
@@ -644,7 +698,7 @@ def train(model, img2text, flow_net, qformer, criterion, data, epoch, optimizer,
             if args.loss_type != "global":
                 raise ValueError(f"Unsupported loss_type: {args.loss_type}")
             loss_dict = criterion(q, y, e_m)
-            total_loss = loss_dict["loss"]
+            total_loss = loss_dict["loss"] + getattr(args, "lambda_qformer_mod_ret", 0.0) * loss_qformer_mod_ret
             total_loss.backward()
             optimizer.step()
 
@@ -666,6 +720,7 @@ def train(model, img2text, flow_net, qformer, criterion, data, epoch, optimizer,
                 f"FM: {loss_dict['loss_fm'].item():.6f}\t"
                 f"End: {loss_dict['loss_end'].item():.6f}\t"
                 f"Ret: {loss_dict['loss_ret'].item():.6f}\t"
+                f"QFormerModRet: {loss_qformer_mod_ret.item():.6f}\t"
                 f"Data (t) {data_time:.3f}\tBatch (t) {batch_time:.3f}\t"
                 f"LR: {optimizer.param_groups[0]['lr']:.6e}"
             )
@@ -676,6 +731,7 @@ def train(model, img2text, flow_net, qformer, criterion, data, epoch, optimizer,
                 "loss_fm": loss_dict["loss_fm"].item(),
                 "loss_end": loss_dict["loss_end"].item(),
                 "loss_ret": loss_dict["loss_ret"].item(),
+                "loss_qformer_mod_ret": loss_qformer_mod_ret.item(),
                 "data_time": data_time,
                 "batch_time": batch_time,
                 "lr": optimizer.param_groups[0]["lr"],

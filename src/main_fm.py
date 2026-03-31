@@ -717,6 +717,10 @@ def main():
         args.lambda_end = 1.0
     if not hasattr(args, "lambda_ret"):
         args.lambda_ret = 0.05
+    if not hasattr(args, "lambda_qformer_mod_ret"):
+        args.lambda_qformer_mod_ret = 0.0
+    if not hasattr(args, "qformer_mod_ret_temperature"):
+        args.qformer_mod_ret_temperature = 0.07
     if not hasattr(args, "lambda_mid"):
         args.lambda_mid = 0.5
     if not hasattr(args, "flow_training_objective"):

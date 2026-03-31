@@ -599,6 +599,18 @@ def parse_args():
     parser.add_argument("--lambda-fm", type=float, default=1.0, help="Weight of the flow matching loss.")
     parser.add_argument("--lambda-end", type=float, default=1.0, help="Weight of the endpoint reconstruction loss.")
     parser.add_argument("--lambda-ret", type=float, default=0.05, help="Weight of the global retrieval loss.")
+    parser.add_argument(
+        "--lambda-qformer-mod-ret",
+        type=float,
+        default=0.0,
+        help="Weight of contrastive retrieval loss between qformer feature and modification-text feature.",
+    )
+    parser.add_argument(
+        "--qformer-mod-ret-temperature",
+        type=float,
+        default=0.07,
+        help="Temperature for qformer-modification contrastive retrieval loss.",
+    )
     parser.add_argument("--lambda-mid", type=float, default=0.5, help="Reserved weight for mid-point losses.")
     parser.add_argument(
         "--flow-training-objective",
