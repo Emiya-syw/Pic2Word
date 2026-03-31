@@ -10,7 +10,7 @@ log_root="/home/sunyw/CIR/Pic2Word/logs/${exp_name}"
 ckpt_dir="${log_root}/checkpoints"
 
 resume_path="/home/sunyw/CIR/Pic2Word/weights/pic2word_model.pt"
-
+# resume_path="/home/sunyw/CIR/Pic2Word/logs/fm_composed_geodesic_image_cond_v_gate_exp_film/checkpoints/epoch_10.pt"
 loss_type="global"
 lambda_fm="1.0"
 lambda_end="0.0"
@@ -20,8 +20,8 @@ lambda_ret="0.0002"
 # Global flow config
 # -----------------------------
 flow_conditioning="enabled"
-flow_start_source="text"       # text | image | inversion | composed | qformer
-flow_condition_source="image"   # text | image | inversion | composed | qformer
+flow_start_source="qformer"       # text | image | inversion | composed | qformer
+flow_condition_source="text"   # text | image | inversion | composed | qformer
 flow_compose_method="pic2word"  # add | mean | pic2word
 flow_pic2word_marker="*"
 flow_start_text_weight="1.0"
@@ -51,7 +51,7 @@ qformer_num_layers="2"
 qformer_num_heads="8"
 qformer_mlp_ratio="4.0"
 qformer_dropout="0.0"
-qformer_query_init_std="0.0"
+qformer_query_init_std="0.02"
 qformer_use_input_proj=0
 qformer_image_end_layer="-1"
 qformer_text_end_layer="-1"
@@ -127,7 +127,7 @@ train_data_path="composed_image_retrieval/train.sh"
 val_data_path="composed_image_retrieval/val.sh"
 train_dataset_type="cc3m"
 val_dataset_type="fashion-iq"
-target_epoch=10
+target_epoch=20
 
 echo "=========================================="
 echo "Train to epoch ${target_epoch}"
@@ -153,11 +153,11 @@ CUDA_VISIBLE_DEVICES=${train_gpus} python -u src/main_fm.py \
     --dataset-type "${train_dataset_type}" \
     --dataset-type-val "${val_dataset_type}" \
     --warmup 500 \
-    --batch-size 256 \
+    --batch-size 64 \
     --lr 5e-5 \
     --wd 0.1 \
     --epochs ${target_epoch} \
-    --workers 8 \
+    --workers 16 \
     --loss-type ${loss_type} \
     --openai-pretrained \
     --model ViT-L/14 \
