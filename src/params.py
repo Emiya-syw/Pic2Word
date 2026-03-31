@@ -538,13 +538,13 @@ def parse_args():
     parser.add_argument(
         "--qformer-dropout",
         type=float,
-        default=0.1,
+        default=0.0,
         help="Dropout used in Q-Former cross-attention and MLP.",
     )
     parser.add_argument(
         "--qformer-query-init-std",
         type=float,
-        default=0.02,
+        default=0.0,
         help="Initialization std for the single learnable query token.",
     )
     parser.add_argument(
