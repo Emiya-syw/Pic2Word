@@ -81,8 +81,8 @@ class SingleQueryQFormer(nn.Module):
         num_layers=2,
         num_heads=8,
         mlp_ratio=4.0,
-        dropout=0.1,
-        query_init_std=0.02,
+        dropout=0.0,
+        query_init_std=0.0,
         use_input_proj=True,
     ):
         super().__init__()
