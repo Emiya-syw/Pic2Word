@@ -273,7 +273,6 @@ def main_worker(gpu, ngpus_per_node, log_queue, args):
 
     # --------------------------------------------------
     # 3. Flow net
-    # Only this module is optimized
     # --------------------------------------------------
     if args.loss_type != "global":
         raise ValueError(f"Unsupported loss_type: {args.loss_type}")
@@ -302,7 +301,10 @@ def main_worker(gpu, ngpus_per_node, log_queue, args):
             unfreeze_module(qformer)
         else:
             freeze_module(qformer)
-    # flow_net stays trainable
+    if getattr(args, "train_flow_net", True):
+        unfreeze_module(flow_net)
+    else:
+        freeze_module(flow_net)
 
     # --------------------------------------------------
     # 5. Precision / device
@@ -334,12 +336,25 @@ def main_worker(gpu, ngpus_per_node, log_queue, args):
             model = torch.nn.SyncBatchNorm.convert_sync_batchnorm(model)
 
         if args.distributed:
-            # Only wrap trainable module with DDP
-            flow_net = torch.nn.parallel.DistributedDataParallel(
-                flow_net,
-                device_ids=[args.gpu],
-                find_unused_parameters=False,
-            )
+            # Wrap only trainable modules with DDP to avoid RuntimeError on frozen modules.
+            if getattr(args, "train_flow_net", True):
+                flow_net = torch.nn.parallel.DistributedDataParallel(
+                    flow_net,
+                    device_ids=[args.gpu],
+                    find_unused_parameters=False,
+                )
+            if args.train_img2text:
+                img2text = torch.nn.parallel.DistributedDataParallel(
+                    img2text,
+                    device_ids=[args.gpu],
+                    find_unused_parameters=False,
+                )
+            if qformer is not None and args.train_qformer:
+                qformer = torch.nn.parallel.DistributedDataParallel(
+                    qformer,
+                    device_ids=[args.gpu],
+                    find_unused_parameters=False,
+                )
 
         if args.dp:
             model = torch.nn.DataParallel(model, device_ids=args.multigpu)
@@ -382,7 +397,11 @@ def main_worker(gpu, ngpus_per_node, log_queue, args):
     exclude = lambda n: ("bn" in n) or ("ln" in n) or ("bias" in n)
     include = lambda n: not exclude(n)
 
-    named_parameters = list(unwrap_model(flow_net).named_parameters())
+    named_parameters = []
+    if getattr(args, "train_flow_net", True):
+        named_parameters.extend(
+            [(f"flow_net.{n}", p) for n, p in unwrap_model(flow_net).named_parameters()]
+        )
     if args.train_img2text:
         named_parameters.extend(
             [(f"img2text.{n}", p) for n, p in unwrap_model(img2text).named_parameters()]
@@ -393,6 +412,10 @@ def main_worker(gpu, ngpus_per_node, log_queue, args):
         )
     gain_or_bias_params = [p for n, p in named_parameters if exclude(n) and p.requires_grad]
     rest_params = [p for n, p in named_parameters if include(n) and p.requires_grad]
+    if len(gain_or_bias_params) + len(rest_params) == 0 and args.train_data is not None:
+        raise ValueError(
+            "No trainable parameters found. Enable flow_net training or set --train-qformer / --train-img2text."
+        )
 
     if args.train_data is None:
         optimizer = None
