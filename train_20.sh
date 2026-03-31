@@ -14,7 +14,7 @@ resume_path="/home/sunyw/CIR/Pic2Word/weights/pic2word_model.pt"
 loss_type="global"
 lambda_fm="1.0"
 lambda_end="0.0"
-lambda_ret="0.0002"
+lambda_ret="0.000"
 
 # -----------------------------
 # Global flow config
@@ -55,6 +55,7 @@ qformer_query_init_std="0.02"
 qformer_use_input_proj=0
 qformer_image_end_layer="-1"
 qformer_text_end_layer="-1"
+lambda_qformer_mod_ret="1.0"
 
 if [ "${training_stage}" = "1" ]; then
     train_flow_net=1
@@ -112,6 +113,7 @@ if [ "${flow_start_source}" = "qformer" ] || [ "${flow_condition_source}" = "qfo
         --qformer-query-init-std "${qformer_query_init_std}"
         --qformer-image-end-layer "${qformer_image_end_layer}"
         --qformer-text-end-layer "${qformer_text_end_layer}"
+        --lambda-qformer-mod-ret "${lambda_qformer_mod_ret}"
     )
 
     if [ "${train_qformer}" -eq 1 ]; then
