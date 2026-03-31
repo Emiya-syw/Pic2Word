@@ -931,7 +931,7 @@ def evaluate_cirr_fm(model, img2text, args, query_loader, target_loader, flow_ne
             caption_features = caption_features / caption_features.norm(dim=-1, keepdim=True)
 
             query_image_features = m.encode_image(ref_images)
-            query_image_features = query_image_features / query_image_features.norm(dim=-1, keepdim=True)
+            
 
             query_image_tokens = it(query_image_features)
             composed_feature = m.encode_text_img_retrieval(
@@ -943,7 +943,7 @@ def evaluate_cirr_fm(model, img2text, args, query_loader, target_loader, flow_ne
                 m, it, ref_images, text_with_blank, args
             )
             embedding_feature = embedding_feature / embedding_feature.norm(dim=-1, keepdim=True)
-
+            query_image_features = query_image_features / query_image_features.norm(dim=-1, keepdim=True)
             mixture_features = query_image_features + caption_features
             mixture_features = mixture_features / mixture_features.norm(dim=-1, keepdim=True)
 

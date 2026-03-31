@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-exp_name="fm_geodesic_image_text_v2"
+exp_name="fm_geodesic_text_image_0330"
 
 gpu_id=0
 train_gpus="0,1,2,3,4,5,6,7"
@@ -14,7 +14,7 @@ resume_path="/home/sunyw/CIR/Pic2Word/weights/pic2word_model.pt"
 loss_type="global"
 lambda_fm="1.0"
 lambda_end="0.0"
-lambda_ret="0.000"
+lambda_ret="0.0002"
 
 # -----------------------------
 # Global flow config
@@ -37,7 +37,7 @@ flow_path_type="geodesic"   # linear | geodesic
 disable_delta=1
 disable_cond_gate=0
 flow_training_objective="flow_matching"    # flow_matching | start_end_mse
-flow_block_type="${FLOW_BLOCK_TYPE:-residual}"      # residual | film
+flow_block_type="${FLOW_BLOCK_TYPE:-film}"      # residual | film
 flow_film_expansion="${FLOW_FILM_EXPANSION:-2}"     # used when flow_block_type=film
 
 # -----------------------------
@@ -146,5 +146,4 @@ CUDA_VISIBLE_DEVICES=${train_gpus} python -u src/main_fm.py \
     --lambda-ret "${lambda_ret}" \
     --name "${exp_name}" \
     --flow-num-steps 16 \
-    --train-clip-text-encoder \
     "${extra_flow_args[@]}"
