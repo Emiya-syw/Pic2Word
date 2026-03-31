@@ -12,7 +12,8 @@ set -euo pipefail
 DRY_RUN="${DRY_RUN:-0}"
 
 exp_name="${EXP_NAME:-qformer10_jointflow10}"
-train_gpus="${TRAIN_GPUS:-0}"
+# 默认 8 卡训练；可通过 TRAIN_GPUS 覆盖，例如 TRAIN_GPUS=0,1
+train_gpus="${TRAIN_GPUS:-0,1,2,3,4,5,6,7}"
 
 # data
 train_data_path="${TRAIN_DATA_PATH:-composed_image_retrieval/train.sh}"
@@ -73,9 +74,13 @@ qformer_text_end_layer="${QFORMER_TEXT_END_LAYER:--1}"
 
 run_cmd() {
     if [ "$DRY_RUN" = "1" ]; then
-        echo "[DRY_RUN] $*"
+        printf "[DRY_RUN]"
+        for arg in "$@"; do
+            printf " %q" "$arg"
+        done
+        printf "\n"
     else
-        eval "$@"
+        "$@"
     fi
 }
 
@@ -142,17 +147,20 @@ echo "Stage1 ckpt : ${stage1_ckpt}"
 echo "=========================================="
 
 # Stage 1: freeze flow_net, only optimize qformer contrastive objective
-stage1_cmd="CUDA_VISIBLE_DEVICES=${train_gpus} python -u src/main_fm.py ${base_args[*]} \
-    --epochs ${stage1_total_epochs} \
-    --resume ${resume_path} \
-    --name ${stage1_name} \
-    --train-qformer \
-    --freeze-flow-net \
-    --lambda-fm 0.0 \
-    --lambda-end 0.0 \
-    --lambda-ret 0.0 \
-    --lambda-qformer-mod-ret ${lambda_qformer_mod_ret}"
-run_cmd "$stage1_cmd"
+stage1_cmd=(
+    env "CUDA_VISIBLE_DEVICES=${train_gpus}" python -u src/main_fm.py
+    "${base_args[@]}"
+    --epochs "${stage1_total_epochs}"
+    --resume "${resume_path}"
+    --name "${stage1_name}"
+    --train-qformer
+    --freeze-flow-net
+    --lambda-fm 0.0
+    --lambda-end 0.0
+    --lambda-ret 0.0
+    --lambda-qformer-mod-ret "${lambda_qformer_mod_ret}"
+)
+run_cmd "${stage1_cmd[@]}"
 
 if [ "$DRY_RUN" != "1" ] && [ ! -f "$stage1_ckpt" ]; then
     echo "[ERROR] Stage1 checkpoint not found: $stage1_ckpt"
@@ -164,15 +172,18 @@ resume_stage2="$stage1_ckpt"
 if [ "$DRY_RUN" = "1" ]; then
     resume_stage2="<stage1_checkpoint>"
 fi
-stage2_cmd="CUDA_VISIBLE_DEVICES=${train_gpus} python -u src/main_fm.py ${base_args[*]} \
-    --epochs ${stage2_total_epochs} \
-    --resume ${resume_stage2} \
-    --name ${stage2_name} \
-    --train-qformer \
-    --lambda-fm ${lambda_fm} \
-    --lambda-end ${lambda_end} \
-    --lambda-ret ${lambda_ret} \
-    --lambda-qformer-mod-ret ${lambda_qformer_mod_ret}"
-run_cmd "$stage2_cmd"
+stage2_cmd=(
+    env "CUDA_VISIBLE_DEVICES=${train_gpus}" python -u src/main_fm.py
+    "${base_args[@]}"
+    --epochs "${stage2_total_epochs}"
+    --resume "${resume_stage2}"
+    --name "${stage2_name}"
+    --train-qformer
+    --lambda-fm "${lambda_fm}"
+    --lambda-end "${lambda_end}"
+    --lambda-ret "${lambda_ret}"
+    --lambda-qformer-mod-ret "${lambda_qformer_mod_ret}"
+)
+run_cmd "${stage2_cmd[@]}"
 
 echo "[DONE] Two-stage training finished."
