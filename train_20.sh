@@ -44,7 +44,9 @@ flow_film_expansion="${FLOW_FILM_EXPANSION:-2}"     # used when flow_block_type=
 # Single-query Q-Former config
 # 仅当 start/condition source 任一为 qformer 时生效
 # -----------------------------
+training_stage="${TRAINING_STAGE:-3}"  # 1: flow only, 2: qformer only(freeze flow), 3: flow+qformer
 train_qformer=1
+train_flow_net=1
 qformer_num_layers="2"
 qformer_num_heads="8"
 qformer_mlp_ratio="4.0"
@@ -53,6 +55,20 @@ qformer_query_init_std="0.0"
 qformer_use_input_proj=0
 qformer_image_end_layer="-1"
 qformer_text_end_layer="-1"
+
+if [ "${training_stage}" = "1" ]; then
+    train_flow_net=1
+    train_qformer=0
+elif [ "${training_stage}" = "2" ]; then
+    train_flow_net=0
+    train_qformer=1
+elif [ "${training_stage}" = "3" ]; then
+    train_flow_net=1
+    train_qformer=1
+else
+    echo "Unsupported TRAINING_STAGE=${training_stage}, expected 1|2|3"
+    exit 1
+fi
 
 extra_flow_args=(
     --global-flow-conditioning "${flow_conditioning}"
@@ -81,6 +97,10 @@ fi
 
 if [ "${disable_cond_gate}" -eq 1 ]; then
     extra_flow_args+=(--global-flow-disable-cond-gate)
+fi
+
+if [ "${train_flow_net}" -eq 0 ]; then
+    extra_flow_args+=(--freeze-flow-net)
 fi
 
 if [ "${flow_start_source}" = "qformer" ] || [ "${flow_condition_source}" = "qformer" ]; then
@@ -115,6 +135,7 @@ echo "Resume from: ${resume_path}"
 echo "Flow conditioning: ${flow_conditioning}"
 echo "Flow start source: ${flow_start_source}"
 echo "Flow condition source: ${flow_condition_source}"
+echo "Training stage: ${training_stage} (train_flow_net=${train_flow_net}, train_qformer=${train_qformer})"
 echo "Flow compose method: ${flow_compose_method}"
 echo "Flow path type: ${flow_path_type}"
 echo "Flow block type: ${flow_block_type} (film_expansion=${flow_film_expansion})"

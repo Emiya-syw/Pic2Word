@@ -264,6 +264,12 @@ def parse_args():
         action="store_true",
         help="If set, unfreeze and train img2text in flow-matching training.",
     )
+    parser.add_argument(
+        "--freeze-flow-net",
+        default=False,
+        action="store_true",
+        help="If set, freeze flow_net parameters (useful for staged training with qformer/img2text).",
+    )
     # arguments for distributed training
     parser.add_argument(
         "--dist-url",
@@ -626,6 +632,7 @@ def parse_args():
     args.embedding_feature_log_samples = max(1, int(args.embedding_feature_log_samples))
     args.embedding_feature_log_max_batches = max(1, int(args.embedding_feature_log_max_batches))
     args.aggregate = not args.skip_aggregate
+    args.train_flow_net = not args.freeze_flow_net
 
     # If some params are not passed, we use the default values based on model name.
     default_params = get_default_params(args.model)
