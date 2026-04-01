@@ -76,6 +76,14 @@ def encode_text_batch(model, texts, args):
     return text_features
 
 
+def encode_fixed_prompt_feature(model, args, prompt="a photo of", batch_size=1):
+    prompt_tokens = tokenize([prompt])
+    if args.gpu is not None:
+        prompt_tokens = prompt_tokens.cuda(args.gpu, non_blocking=True)
+    prompt_tokens = prompt_tokens.long().repeat(batch_size, 1)
+    return model.encode_text(prompt_tokens)
+
+
 def apply_global_start_noise(features, args):
     noise_std = getattr(args, "global_start_noise_std", 0.0)
     if noise_std <= 0:
@@ -279,6 +287,17 @@ def build_global_flow_feature(model, img2text, ref_images, texts, args, source, 
     source = source.lower()
     if source == "text":
         feature = encode_text_batch(model, texts, args)
+    elif source == "photo":
+        if isinstance(texts, torch.Tensor):
+            batch_size = texts.size(0)
+        else:
+            batch_size = len(texts)
+        feature = encode_fixed_prompt_feature(
+            model=model,
+            args=args,
+            prompt="a photo of",
+            batch_size=batch_size,
+        )
     elif source == "image":
         feature = encode_image_batch(model, ref_images, args)
     elif source == "inversion":
