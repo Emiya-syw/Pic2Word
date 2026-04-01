@@ -411,7 +411,7 @@ def parse_args():
     parser.add_argument(
         "--global-flow-start-source",
         type=str,
-        choices=["text", "image", "inversion", "composed", "qformer"],
+        choices=["text", "photo", "image", "inversion", "composed", "qformer"],
         default="text",
         help="Which feature to use as the start state of the global flow.",
     )
