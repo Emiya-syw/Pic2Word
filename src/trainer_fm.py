@@ -448,6 +448,34 @@ def parse_val_batch_for_flow(batch):
     raise TypeError(f"Unsupported validation batch type: {type(batch)}")
 
 
+def _compute_retrieval_metrics(query_features, target_features=None, gallery_features=None, gallery_names=None, answer_names=None):
+    if query_features is None or len(query_features) == 0:
+        return {}
+
+    query_features = F.normalize(torch.cat(query_features, dim=0), dim=-1)
+
+    if gallery_features is not None and answer_names is not None and len(answer_names) > 0:
+        logits = query_features @ gallery_features.t()
+        ranking = torch.argsort(logits, dim=-1, descending=True)
+        name_to_index = {name: idx for idx, name in enumerate(gallery_names)}
+        gt_index = torch.tensor([name_to_index[name] for name in answer_names], dtype=torch.long)
+        gt_pos = torch.where(ranking == gt_index.view(-1, 1))[1]
+    elif target_features is not None and len(target_features) > 0:
+        target_features = F.normalize(torch.cat(target_features, dim=0), dim=-1)
+        logits = query_features @ target_features.t()
+        ranking = torch.argsort(logits, dim=-1, descending=True)
+        gt = torch.arange(ranking.size(0)).view(-1, 1)
+        gt_pos = torch.where(ranking == gt)[1]
+    else:
+        return {}
+
+    metrics = {}
+    for k in [1, 5, 10, 50, 100]:
+        k_eff = min(k, ranking.size(1))
+        metrics[f"R@{k}"] = (gt_pos < k_eff).float().mean().item() * 100.0
+    return metrics
+
+
 def validate(model, img2text, flow_net, qformer, criterion, data, epoch, args, writer=None):
     if "val" not in data:
         return None
@@ -469,8 +497,11 @@ def validate(model, img2text, flow_net, qformer, criterion, data, epoch, args, w
     m.eval()
     it.eval()
     flow.eval()
+    if qf is not None:
+        qf.eval()
 
     all_query_features = []
+    all_qformer_query_features = []
     all_target_features = []
     all_answer_names = []
     gallery_features = None
@@ -512,6 +543,8 @@ def validate(model, img2text, flow_net, qformer, criterion, data, epoch, args, w
                 text_weight=getattr(args, "global_flow_start_text_weight", 1.0),
                 image_weight=getattr(args, "global_flow_start_image_weight", 1.0),
             )
+            if qf is not None:
+                all_qformer_query_features.append(_normalize_feature(q).detach().cpu())
             use_condition = getattr(args, "global_flow_conditioning", "enabled") == "enabled"
             e_m = None
             if use_condition:
@@ -555,30 +588,23 @@ def validate(model, img2text, flow_net, qformer, criterion, data, epoch, args, w
     if len(all_query_features) == 0:
         return None
 
-    val_metrics = {}
-    if gallery_features is not None and len(all_query_features) > 0 and len(all_answer_names) > 0:
-        query_features = F.normalize(torch.cat(all_query_features, dim=0), dim=-1)
-        logits = query_features @ gallery_features.t()
-        ranking = torch.argsort(logits, dim=-1, descending=True)
-
-        name_to_index = {name: idx for idx, name in enumerate(gallery_names)}
-        gt_index = torch.tensor([name_to_index[name] for name in all_answer_names], dtype=torch.long)
-        gt_pos = torch.where(ranking == gt_index.view(-1, 1))[1]
-
-        for k in [1, 5, 10, 50, 100]:
-            k_eff = min(k, ranking.size(1))
-            val_metrics[f"R@{k}"] = (gt_pos < k_eff).float().mean().item() * 100.0
-    elif len(all_query_features) > 0 and len(all_target_features) > 0:
-        query_features = F.normalize(torch.cat(all_query_features, dim=0), dim=-1)
-        target_features = F.normalize(torch.cat(all_target_features, dim=0), dim=-1)
-        logits = query_features @ target_features.t()
-        ranking = torch.argsort(logits, dim=-1, descending=True)
-        gt = torch.arange(ranking.size(0)).view(-1, 1)
-        gt_pos = torch.where(ranking == gt)[1]
-
-        for k in [1, 5, 10, 50, 100]:
-            k_eff = min(k, ranking.size(1))
-            val_metrics[f"R@{k}"] = (gt_pos < k_eff).float().mean().item() * 100.0
+    val_metrics = _compute_retrieval_metrics(
+        query_features=all_query_features,
+        target_features=all_target_features,
+        gallery_features=gallery_features,
+        gallery_names=gallery_names,
+        answer_names=all_answer_names,
+    )
+    if qf is not None and len(all_qformer_query_features) > 0:
+        qformer_metrics = _compute_retrieval_metrics(
+            query_features=all_qformer_query_features,
+            target_features=all_target_features,
+            gallery_features=gallery_features,
+            gallery_names=gallery_names,
+            answer_names=all_answer_names,
+        )
+        for key, value in qformer_metrics.items():
+            val_metrics[f"qformer_{key}"] = value
 
     if is_master(args):
         metric_text = "\t".join([f"{k}: {v:.4f}" for k, v in val_metrics.items()])
