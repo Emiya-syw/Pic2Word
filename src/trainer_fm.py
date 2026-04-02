@@ -156,7 +156,22 @@ def encode_qformer_feature(model, qformer, ref_images, texts, args):
     text_mask = tokens != 0
     image_tokens = model.encode_image_tokens(ref_images, end_layer=args.qformer_image_end_layer)
     text_tokens = model.encode_text_tokens(tokens, end_layer=args.qformer_text_end_layer)
-    return qformer(image_tokens=image_tokens, text_tokens=text_tokens, text_mask=text_mask)
+    q_tokens = qformer(image_tokens=image_tokens, text_tokens=text_tokens, text_mask=text_mask)
+    if q_tokens.ndim != 3:
+        raise ValueError("Q-Former must return query tokens with shape [B, Nq, D].")
+
+    split_text = getattr(args, "qformer_prompt_marker", "*")
+    prompt = getattr(args, "qformer_prompt", "a photo of *")
+    split_token_id = tokenize([split_text])[0][1].item()
+    prompt_tokens = tokenize_to_device([prompt], args)
+    prompt_tokens = _expand_pic2word_marker_slots(prompt_tokens, split_token_id, q_tokens.size(1))
+    q_token_tuple = tuple(q_tokens[:, i, :] for i in range(q_tokens.size(1)))
+    return model.encode_text_img_retrieval(
+        prompt_tokens,
+        q_token_tuple,
+        split_ind=split_token_id,
+        repeat=True,
+    )
 
 def _expand_pic2word_marker_slots(text_tokens, marker_token_id, num_slots):
     if num_slots <= 1:
@@ -382,13 +397,14 @@ def parse_batch_for_flow(batch):
         (ref_images, mod_texts, target_texts)
 
     Returns:
-        ref_images, mod_texts, target_texts
+        ref_images, mod_texts, target_texts, target_images(optional)
     """
     if isinstance(batch, dict):
         ref_images = batch["ref_images"]
         mod_texts = batch["mod_texts"]
-        target_texts = batch["target_texts"]
-        return ref_images, mod_texts, target_texts
+        target_texts = batch.get("target_texts", None)
+        target_images = batch.get("target_images", None)
+        return ref_images, mod_texts, target_texts, target_images
 
     if isinstance(batch, (list, tuple)):
         if len(batch) < 3:
@@ -396,7 +412,11 @@ def parse_batch_for_flow(batch):
                 "Flow matching training expects batch to contain at least "
                 "(ref_images, mod_texts, target_texts)."
             )
-        return batch[0], batch[1], batch[2]
+        if len(batch) == 3:
+            return batch[0], batch[1], batch[2], None
+        if torch.is_tensor(batch[1]):
+            return batch[0], batch[2], batch[3], batch[1]
+        return batch[0], batch[1], batch[2], batch[3]
 
     raise TypeError(f"Unsupported batch type: {type(batch)}")
 
@@ -506,24 +526,27 @@ def validate(model, img2text, flow_net, qformer, criterion, data, epoch, args, w
                     text_weight=getattr(args, "global_flow_condition_text_weight", 1.0),
                     image_weight=getattr(args, "global_flow_condition_image_weight", 1.0),
                 )
-            if target_texts is not None:
-                val_target_features = _normalize_feature(encode_text_batch(m, target_texts, args))
-            elif target_images is not None:
+            if target_images is not None:
                 val_target_features = _normalize_feature(encode_image_batch(m, target_images, args))
+            elif target_texts is not None:
+                val_target_features = _normalize_feature(encode_text_batch(m, target_texts, args))
             else:
                 raise ValueError("Validation batch must provide target_texts or target_images.")
 
             q = apply_global_start_noise(q, args)
-            val_query_features = flow_matching_inference(
-                flow_net=flow,
-                q=q,
-                e_m=e_m,
-                num_steps=getattr(args, "flow_num_steps", 16),
-                training_objective=getattr(args, "flow_training_objective", "flow_matching"),
-                step_normalize=getattr(args, "flow_step_normalize", True),
-                step_norm_type=getattr(args, "flow_step_norm_type", "l2"),
-                hybrid_geodesic_steps=getattr(args, "flow_hybrid_geodesic_steps", 0),
-            )
+            if getattr(args, "training_stage", "flow") == "qformer_pretrain":
+                val_query_features = q
+            else:
+                val_query_features = flow_matching_inference(
+                    flow_net=flow,
+                    q=q,
+                    e_m=e_m,
+                    num_steps=getattr(args, "flow_num_steps", 16),
+                    training_objective=getattr(args, "flow_training_objective", "flow_matching"),
+                    step_normalize=getattr(args, "flow_step_normalize", True),
+                    step_norm_type=getattr(args, "flow_step_norm_type", "l2"),
+                    hybrid_geodesic_steps=getattr(args, "flow_hybrid_geodesic_steps", 0),
+                )
 
             val_query_features = _normalize_feature(val_query_features)
             all_query_features.append(val_query_features.detach().cpu())
@@ -604,7 +627,7 @@ def train(model, img2text, flow_net, qformer, criterion, data, epoch, optimizer,
         # --------------------------------------------------
         # 1. parse batch
         # --------------------------------------------------
-        ref_images, mod_texts, target_texts = parse_batch_for_flow(batch)
+        ref_images, mod_texts, target_texts, target_images = parse_batch_for_flow(batch)
         # ref_images, target_images, mod_texts = parse_batch_for_flow(batch)
         
         # if i == 0 and is_master(args):
@@ -684,11 +707,14 @@ def train(model, img2text, flow_net, qformer, criterion, data, epoch, optimizer,
                     image_weight=getattr(args, "global_flow_condition_image_weight", 1.0),
                     precomputed_qformer_feature=shared_qformer_feature,
                 )
-            y = encode_text_batch(m, target_texts, args)
+            y = None
+            if target_texts is not None:
+                y = encode_text_batch(m, target_texts, args)
 
             q = apply_global_start_noise(q, args)
             q = _normalize_feature(q)
-            y = _normalize_feature(y)
+            if y is not None:
+                y = _normalize_feature(y)
             if e_m is not None:
                 e_m = _normalize_feature(e_m)
 
@@ -704,7 +730,42 @@ def train(model, img2text, flow_net, qformer, criterion, data, epoch, optimizer,
         # --------------------------------------------------
         # 3. flow matching loss
         # --------------------------------------------------
-        if args.precision == "amp":
+        if getattr(args, "training_stage", "flow") == "qformer_pretrain":
+            if target_images is not None:
+                target_images = move_to_device(target_images, args.gpu)
+            if target_texts is None and target_images is None:
+                raise ValueError("qformer_pretrain requires target_texts or target_images in each batch.")
+            if args.precision == "amp":
+                with autocast():
+                    target_feature = (
+                        encode_image_batch(m, target_images, args)
+                        if target_images is not None else encode_text_batch(m, target_texts, args)
+                    )
+                    loss_qformer_ret = _bidirectional_contrastive_loss(
+                        q,
+                        target_feature,
+                        temperature=getattr(args, "qformer_stage1_temperature", 0.07),
+                    )
+                    total_loss = loss_qformer_ret
+                scaler.scale(total_loss).backward()
+                scaler.step(optimizer)
+                scaler.update()
+            else:
+                target_feature = (
+                    encode_image_batch(m, target_images, args)
+                    if target_images is not None else encode_text_batch(m, target_texts, args)
+                )
+                loss_qformer_ret = _bidirectional_contrastive_loss(
+                    q,
+                    target_feature,
+                    temperature=getattr(args, "qformer_stage1_temperature", 0.07),
+                )
+                total_loss = loss_qformer_ret
+                total_loss.backward()
+                optimizer.step()
+            loss_dict = {"loss_fm": torch.zeros_like(total_loss), "loss_end": torch.zeros_like(total_loss), "loss_ret": loss_qformer_ret}
+            loss_qformer_mod_ret = loss_qformer_ret
+        elif args.precision == "amp":
             with autocast():
                 if args.loss_type != "global":
                     raise ValueError(f"Unsupported loss_type: {args.loss_type}")

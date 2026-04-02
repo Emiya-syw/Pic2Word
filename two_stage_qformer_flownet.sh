@@ -2,8 +2,8 @@
 set -euo pipefail
 
 # Two-stage training:
-#   Stage 1: contrastive pretrain qformer for N epochs (flow net frozen)
-#   Stage 2: joint train qformer + flow net for M epochs
+#   Stage 1: qformer_pretrain（不走 flow matching）
+#   Stage 2: flow（用 stage1 的 qformer 初始化后进行 flow matching）
 #
 # Usage examples:
 #   bash two_stage_qformer_flownet.sh
@@ -11,7 +11,7 @@ set -euo pipefail
 
 DRY_RUN="${DRY_RUN:-0}"
 
-exp_name="${EXP_NAME:-qformer10_jointflow10}"
+exp_name="${EXP_NAME:-qformer10_flow10}"
 # 默认 8 卡训练；可通过 TRAIN_GPUS 覆盖，例如 TRAIN_GPUS=0,1
 train_gpus="${TRAIN_GPUS:-0,1,2,3,4,5,6,7}"
 
@@ -26,8 +26,8 @@ resume_path="${RESUME_PATH:-/home/sunyw/CIR/Pic2Word/weights/pic2word_model.pt}"
 model_name="${MODEL_NAME:-ViT-L/14}"
 
 # epoch schedule
-stage1_epochs="${STAGE1_EPOCHS:-10}"   # qformer contrastive
-stage2_epochs="${STAGE2_EPOCHS:-10}"   # joint qformer + flow net
+stage1_epochs="${STAGE1_EPOCHS:-10}"   # qformer_pretrain
+stage2_epochs="${STAGE2_EPOCHS:-10}"   # flow
 
 # optimization
 batch_size="${BATCH_SIZE:-64}"
@@ -68,6 +68,10 @@ qformer_num_heads="${QFORMER_NUM_HEADS:-8}"
 qformer_mlp_ratio="${QFORMER_MLP_RATIO:-4.0}"
 qformer_dropout="${QFORMER_DROPOUT:-0.0}"
 qformer_query_init_std="${QFORMER_QUERY_INIT_STD:-0.02}"
+qformer_num_query_tokens="${QFORMER_NUM_QUERY_TOKENS:-4}"
+qformer_prompt="${QFORMER_PROMPT:-a photo of *}"
+qformer_prompt_marker="${QFORMER_PROMPT_MARKER:-*}"
+qformer_stage1_temperature="${QFORMER_STAGE1_TEMPERATURE:-0.07}"
 qformer_use_input_proj="${QFORMER_USE_INPUT_PROJ:-0}"
 qformer_image_end_layer="${QFORMER_IMAGE_END_LAYER:--1}"
 qformer_text_end_layer="${QFORMER_TEXT_END_LAYER:--1}"
@@ -118,6 +122,10 @@ base_args=(
     --qformer-mlp-ratio "${qformer_mlp_ratio}"
     --qformer-dropout "${qformer_dropout}"
     --qformer-query-init-std "${qformer_query_init_std}"
+    --qformer-num-query-tokens "${qformer_num_query_tokens}"
+    --qformer-prompt "${qformer_prompt}"
+    --qformer-prompt-marker "${qformer_prompt_marker}"
+    --qformer-stage1-temperature "${qformer_stage1_temperature}"
     --qformer-image-end-layer "${qformer_image_end_layer}"
     --qformer-text-end-layer "${qformer_text_end_layer}"
 )
@@ -132,33 +140,28 @@ if [ "${qformer_use_input_proj}" = "1" ]; then
     base_args+=(--qformer-use-input-proj)
 fi
 
-stage1_name="${exp_name}_stage1_qformer"
-stage2_name="${exp_name}_stage2_joint"
+stage1_name="${exp_name}_stage1_qformer_pretrain"
+stage2_name="${exp_name}_stage2_flow"
 stage1_total_epochs="${stage1_epochs}"
-stage2_total_epochs=$((stage1_epochs + stage2_epochs))
+stage2_total_epochs="${stage2_epochs}"
 stage1_ckpt="./logs/${stage1_name}/checkpoints/epoch_${stage1_total_epochs}.pt"
 
 echo "=========================================="
 echo "Two-stage training plan"
-echo "Stage 1 (qformer contrastive only): ${stage1_epochs} epochs"
-echo "Stage 2 (qformer + flow net): ${stage2_epochs} epochs"
+echo "Stage 1 (qformer_pretrain): ${stage1_epochs} epochs"
+echo "Stage 2 (flow matching): ${stage2_epochs} epochs"
 echo "Initial resume: ${resume_path}"
 echo "Stage1 ckpt : ${stage1_ckpt}"
 echo "=========================================="
 
-# Stage 1: freeze flow_net, only optimize qformer contrastive objective
+# Stage 1: qformer_pretrain
 stage1_cmd=(
     env "CUDA_VISIBLE_DEVICES=${train_gpus}" python -u src/main_fm.py
     "${base_args[@]}"
+    --training-stage qformer_pretrain
     --epochs "${stage1_total_epochs}"
     --resume "${resume_path}"
     --name "${stage1_name}"
-    --train-qformer
-    --freeze-flow-net
-    --lambda-fm 0.0
-    --lambda-end 0.0
-    --lambda-ret 0.0
-    --lambda-qformer-mod-ret "${lambda_qformer_mod_ret}"
 )
 run_cmd "${stage1_cmd[@]}"
 
@@ -167,18 +170,23 @@ if [ "$DRY_RUN" != "1" ] && [ ! -f "$stage1_ckpt" ]; then
     exit 1
 fi
 
-# Stage 2: joint train qformer + flow_net from stage1 checkpoint
+# Stage 2: flow matching（可选继续训练 qformer）
 resume_stage2="$stage1_ckpt"
 if [ "$DRY_RUN" = "1" ]; then
     resume_stage2="<stage1_checkpoint>"
 fi
+stage2_qformer_flag=()
+if [ "${TRAIN_QFORMER_IN_STAGE2:-1}" = "1" ]; then
+    stage2_qformer_flag+=(--train-qformer)
+fi
 stage2_cmd=(
     env "CUDA_VISIBLE_DEVICES=${train_gpus}" python -u src/main_fm.py
     "${base_args[@]}"
+    --training-stage flow
     --epochs "${stage2_total_epochs}"
     --resume "${resume_stage2}"
     --name "${stage2_name}"
-    --train-qformer
+    "${stage2_qformer_flag[@]}"
     --lambda-fm "${lambda_fm}"
     --lambda-end "${lambda_end}"
     --lambda-ret "${lambda_ret}"

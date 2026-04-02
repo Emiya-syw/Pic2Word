@@ -78,6 +78,7 @@ class SingleQueryQFormer(nn.Module):
         dim,
         image_dim=None,
         text_dim=None,
+        num_query_tokens=1,
         num_layers=2,
         num_heads=8,
         mlp_ratio=4.0,
@@ -96,7 +97,8 @@ class SingleQueryQFormer(nn.Module):
         if use_input_proj or text_dim != dim:
             self.text_proj = nn.Linear(text_dim, dim)
 
-        self.query = nn.Parameter(torch.empty(1, 1, dim))
+        self.num_query_tokens = max(1, int(num_query_tokens))
+        self.query = nn.Parameter(torch.empty(1, self.num_query_tokens, dim))
         nn.init.normal_(self.query, std=query_init_std)
 
         self.layers = nn.ModuleList(
@@ -127,4 +129,4 @@ class SingleQueryQFormer(nn.Module):
             q = layer(q, image_tokens=image_tokens, text_tokens=text_tokens, text_mask=text_mask)
 
         q = self.out_ln(q)
-        return q[:, 0, :]
+        return q
