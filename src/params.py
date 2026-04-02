@@ -524,6 +524,13 @@ def parse_args():
         help="If set, train Single-Query Q-Former parameters when qformer source is used.",
     )
     parser.add_argument(
+        "--training-stage",
+        type=str,
+        choices=["flow", "qformer_pretrain"],
+        default="flow",
+        help="Training stage: qformer_pretrain learns qformer retrieval without flow; flow enables flow matching.",
+    )
+    parser.add_argument(
         "--qformer-num-layers",
         type=int,
         default=2,
@@ -551,7 +558,31 @@ def parse_args():
         "--qformer-query-init-std",
         type=float,
         default=0.0,
-        help="Initialization std for the single learnable query token.",
+        help="Initialization std for the learnable Q-Former query tokens.",
+    )
+    parser.add_argument(
+        "--qformer-num-query-tokens",
+        type=int,
+        default=1,
+        help="Number of learnable Q-Former query tokens.",
+    )
+    parser.add_argument(
+        "--qformer-prompt",
+        type=str,
+        default="a photo of *",
+        help="Prompt template used to inject Q-Former tokens into CLIP text encoder.",
+    )
+    parser.add_argument(
+        "--qformer-prompt-marker",
+        type=str,
+        default="*",
+        help="Marker token inside --qformer-prompt replaced by Q-Former query tokens.",
+    )
+    parser.add_argument(
+        "--qformer-stage1-temperature",
+        type=float,
+        default=0.07,
+        help="Contrastive temperature used in qformer_pretrain stage.",
     )
     parser.add_argument(
         "--qformer-use-input-proj",

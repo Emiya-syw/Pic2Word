@@ -103,6 +103,8 @@ def build_img2text(model, args):
 
 
 def should_use_qformer(args):
+    if getattr(args, "training_stage", "flow") == "qformer_pretrain":
+        return True
     sources = [
         getattr(args, "global_flow_start_source", "text"),
         getattr(args, "global_flow_condition_source", "image"),
@@ -129,6 +131,7 @@ def build_qformer(model, args):
         dim=flow_embed_dim,
         image_dim=image_token_dim,
         text_dim=text_token_dim,
+        num_query_tokens=args.qformer_num_query_tokens,
         num_layers=args.qformer_num_layers,
         num_heads=args.qformer_num_heads,
         mlp_ratio=args.qformer_mlp_ratio,
@@ -240,6 +243,11 @@ def main_worker(gpu, ngpus_per_node, log_queue, args):
         torch.cuda.set_device(args.gpu)
 
     device = get_model_device(args)
+
+    if getattr(args, "training_stage", "flow") == "qformer_pretrain":
+        args.train_qformer = True
+        args.train_flow_net = False
+        args.train_img2text = False
 
     # --------------------------------------------------
     # 1. Backbone model
