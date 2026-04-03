@@ -544,7 +544,18 @@ def validate(model, img2text, flow_net, qformer, criterion, data, epoch, args, w
                 image_weight=getattr(args, "global_flow_start_image_weight", 1.0),
             )
             if qf is not None:
-                all_qformer_query_features.append(_normalize_feature(q).detach().cpu())
+                start_source = getattr(args, "global_flow_start_source", "text").lower()
+                if start_source == "qformer":
+                    qformer_query = q
+                else:
+                    qformer_query = encode_qformer_feature(
+                        model=m,
+                        qformer=qf,
+                        ref_images=ref_images,
+                        texts=mod_texts,
+                        args=args,
+                    )
+                all_qformer_query_features.append(_normalize_feature(qformer_query).detach().cpu())
             use_condition = getattr(args, "global_flow_conditioning", "enabled") == "enabled"
             e_m = None
             if use_condition:
@@ -634,6 +645,11 @@ def train(model, img2text, flow_net, qformer, criterion, data, epoch, optimizer,
     else:
         img2text.eval()
     flow_net.train()
+    if qformer is not None:
+        if getattr(args, "train_qformer", False):
+            qformer.train()
+        else:
+            qformer.eval()
 
     dataloader, sampler = data["train"].dataloader, data["train"].sampler
 
