@@ -15,6 +15,7 @@
 import os
 import time
 import logging
+import math
 import wandb
 import contextlib
 import torch
@@ -224,13 +225,56 @@ def _sphere_expmap_step(x, v, dt, eps=1e-6):
     x_next = torch.cos(theta) * x_unit + torch.sin(theta) * direction
     return _normalize_feature(x_next, eps=eps)
 
-def _bidirectional_contrastive_loss(anchor, positive, temperature=0.07):
+def _debiased_hard_negative_contrastive_loss(
+    logits,
+    temperature=0.07,
+    tau_plus=0.1,
+    beta=1.0,
+    eps=1e-12,
+):
+    batch_size = logits.size(0)
+    if batch_size <= 1:
+        return logits.new_zeros(())
+
+    t = max(float(temperature), 1e-6)
+    tau = min(max(float(tau_plus), 0.0), 1.0 - 1e-6)
+    hardness = max(float(beta), 0.0)
+
+    exp_logits = torch.exp(logits / t)
+    pos = torch.diagonal(exp_logits)
+
+    neg_mask = ~torch.eye(batch_size, dtype=torch.bool, device=logits.device)
+    neg = exp_logits[neg_mask].view(batch_size, batch_size - 1)
+    n_neg = neg.size(1)
+
+    neg_mean = neg.mean(dim=1, keepdim=True).clamp(min=eps)
+    reweight = (hardness * neg) / neg_mean
+    neg_hard = (reweight * neg).sum(dim=1)
+
+    correction = (-n_neg * tau * pos + neg_hard) / (1.0 - tau)
+    floor = logits.new_full((batch_size,), math.exp(-1.0 / t))
+    corrected_neg = torch.maximum(correction, floor)
+
+    denom = (pos + corrected_neg).clamp(min=eps)
+    return (-torch.log(pos / denom)).mean()
+
+
+def _bidirectional_contrastive_loss(
+    anchor,
+    positive,
+    temperature=0.07,
+    tau_plus=0.1,
+    beta=1.0,
+):
     anchor = _normalize_feature(anchor)
     positive = _normalize_feature(positive)
-    logits = anchor @ positive.t() / max(float(temperature), 1e-6)
-    labels = torch.arange(anchor.size(0), device=anchor.device)
-    loss_a2p = F.cross_entropy(logits, labels)
-    loss_p2a = F.cross_entropy(logits.t(), labels)
+    logits = anchor @ positive.t()
+    loss_a2p = _debiased_hard_negative_contrastive_loss(
+        logits, temperature=temperature, tau_plus=tau_plus, beta=beta
+    )
+    loss_p2a = _debiased_hard_negative_contrastive_loss(
+        logits.t(), temperature=temperature, tau_plus=tau_plus, beta=beta
+    )
     return 0.5 * (loss_a2p + loss_p2a)
 
 
@@ -767,6 +811,8 @@ def train(model, img2text, flow_net, qformer, criterion, data, epoch, optimizer,
                     shared_qformer_feature,
                     mod_text_feature,
                     temperature=getattr(args, "qformer_mod_ret_temperature", 0.07),
+                    tau_plus=getattr(args, "qformer_contrast_tau_plus", 0.1),
+                    beta=getattr(args, "qformer_contrast_beta", 1.0),
                 )
 
         # --------------------------------------------------
@@ -787,6 +833,8 @@ def train(model, img2text, flow_net, qformer, criterion, data, epoch, optimizer,
                         q,
                         target_feature,
                         temperature=getattr(args, "qformer_stage1_temperature", 0.07),
+                        tau_plus=getattr(args, "qformer_contrast_tau_plus", 0.1),
+                        beta=getattr(args, "qformer_contrast_beta", 1.0),
                     )
                     total_loss = loss_qformer_ret
                 scaler.scale(total_loss).backward()
@@ -801,6 +849,8 @@ def train(model, img2text, flow_net, qformer, criterion, data, epoch, optimizer,
                     q,
                     target_feature,
                     temperature=getattr(args, "qformer_stage1_temperature", 0.07),
+                    tau_plus=getattr(args, "qformer_contrast_tau_plus", 0.1),
+                    beta=getattr(args, "qformer_contrast_beta", 1.0),
                 )
                 total_loss = loss_qformer_ret
                 total_loss.backward()

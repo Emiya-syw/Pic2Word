@@ -585,6 +585,18 @@ def parse_args():
         help="Contrastive temperature used in qformer_pretrain stage.",
     )
     parser.add_argument(
+        "--qformer-contrast-tau-plus",
+        type=float,
+        default=0.1,
+        help="tau_plus used in debiased hard-negative contrastive loss for Q-Former retrieval objectives.",
+    )
+    parser.add_argument(
+        "--qformer-contrast-beta",
+        type=float,
+        default=1.0,
+        help="Hardness parameter beta used to reweight negatives in Q-Former contrastive loss.",
+    )
+    parser.add_argument(
         "--qformer-use-input-proj",
         action="store_true",
         default=False,
@@ -666,6 +678,8 @@ def parse_args():
     args.flow_hybrid_geodesic_steps = max(0, int(args.flow_hybrid_geodesic_steps))
     args.global_flow_pic2word_num_tokens = max(1, int(args.global_flow_pic2word_num_tokens))
     args.global_flow_pic2word_topk_text = max(0, int(args.global_flow_pic2word_topk_text))
+    args.qformer_contrast_tau_plus = min(max(float(args.qformer_contrast_tau_plus), 0.0), 1.0 - 1e-6)
+    args.qformer_contrast_beta = max(float(args.qformer_contrast_beta), 0.0)
     if args.embedding_feature_topk_text is not None:
         args.embedding_feature_topk_text = max(1, int(args.embedding_feature_topk_text))
         # If users explicitly request embedding top-k tokens, default to showing token logs as well.
