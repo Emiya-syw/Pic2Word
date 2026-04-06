@@ -11,7 +11,7 @@ set -euo pipefail
 
 DRY_RUN="${DRY_RUN:-0}"
 
-exp_name="${EXP_NAME:-qformer10_flow10}"
+exp_name="${EXP_NAME:-qformer10_flow10_v3}"
 # 默认 8 卡训练；可通过 TRAIN_GPUS 覆盖，例如 TRAIN_GPUS=0,1
 train_gpus="${TRAIN_GPUS:-0,1,2,3,4,5,6,7}"
 
@@ -23,16 +23,17 @@ val_dataset_type="${VAL_DATASET_TYPE:-fashion-iq}"
 
 # model/checkpoint
 resume_path="${RESUME_PATH:-/home/sunyw/CIR/Pic2Word/weights/pic2word_model.pt}"
+# resume_path="${RESUME_PATH:-/home/sunyw/CIR/Pic2Word/logs/qformer10_flow10_v2_stage1_qformer_pretrain/checkpoints/epoch_5.pt}"
 model_name="${MODEL_NAME:-ViT-L/14}"
 
 # epoch schedule
-stage1_epochs="${STAGE1_EPOCHS:-10}"   # qformer_pretrain
-stage2_epochs="${STAGE2_EPOCHS:-10}"   # flow
+stage1_epochs="${STAGE1_EPOCHS:-50}"   # qformer_pretrain
+stage2_epochs="${STAGE2_EPOCHS:-60}"   # flow
 
 # optimization
-batch_size="${BATCH_SIZE:-64}"
+batch_size="${BATCH_SIZE:-128}"
 num_workers="${NUM_WORKERS:-16}"
-lr="${LR:-5e-5}"
+lr="${LR:-1e-4}"
 wd="${WD:-0.1}"
 warmup="${WARMUP:-500}"
 flow_num_steps="${FLOW_NUM_STEPS:-16}"
@@ -47,7 +48,7 @@ lambda_ret="${LAMBDA_RET:-0.0}"
 # flow/qformer config
 flow_conditioning="${FLOW_CONDITIONING:-enabled}"
 flow_start_source="${FLOW_START_SOURCE:-qformer}"
-flow_condition_source="${FLOW_CONDITION_SOURCE:-text}"
+flow_condition_source="${FLOW_CONDITION_SOURCE:-image}"
 flow_compose_method="${FLOW_COMPOSE_METHOD:-pic2word}"
 flow_pic2word_marker="${FLOW_PIC2WORD_MARKER:-*}"
 flow_path_type="${FLOW_PATH_TYPE:-geodesic}"
@@ -68,7 +69,7 @@ qformer_num_heads="${QFORMER_NUM_HEADS:-8}"
 qformer_mlp_ratio="${QFORMER_MLP_RATIO:-4.0}"
 qformer_dropout="${QFORMER_DROPOUT:-0.0}"
 qformer_query_init_std="${QFORMER_QUERY_INIT_STD:-0.02}"
-qformer_num_query_tokens="${QFORMER_NUM_QUERY_TOKENS:-4}"
+qformer_num_query_tokens="${QFORMER_NUM_QUERY_TOKENS:-32}"
 qformer_prompt="${QFORMER_PROMPT:-a photo of *}"
 qformer_prompt_marker="${QFORMER_PROMPT_MARKER:-*}"
 qformer_stage1_temperature="${QFORMER_STAGE1_TEMPERATURE:-0.07}"
@@ -89,7 +90,7 @@ run_cmd() {
 }
 
 base_args=(
-    --save-frequency 1
+    --save-frequency 5
     --train-data "${train_data_path}"
     --val-data "${val_data_path}"
     --dataset-type "${train_dataset_type}"
@@ -190,7 +191,7 @@ stage2_cmd=(
     --lambda-fm "${lambda_fm}"
     --lambda-end "${lambda_end}"
     --lambda-ret "${lambda_ret}"
-    --lambda-qformer-mod-ret "${lambda_qformer_mod_ret}"
+    --lambda-qformer-mod-ret "0.0"
 )
 run_cmd "${stage2_cmd[@]}"
 
